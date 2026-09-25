@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quiz Literário</title>
+<style>
+  :root {
+    --fundo: #0b0f0d;
+    --fundo-caixa: #0f1512;
+    --linha: #1f3d2a;
+    --texto: #8fd7a8;
+    --destaque: #4dff88;
+    --erro: #ff6b6b;
+    --acerto: #4dff88;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body {
+    margin: 0;
+    min-height: 100%;
+    background: var(--fundo);
+    color: var(--texto);
+    font-family: 'Courier New', 'IBM Plex Mono', monospace;
+    display: flex;
+    justify-content: center;
+    padding: 24px 14px;
+  }
+  #tela {
+    width: 100%;
+    max-width: 640px;
+  }
+  .linha-topo, .linha-base {
+    color: var(--linha);
+    white-space: pre;
+    overflow-x: auto;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  h1.cabecalho {
+    text-align: center;
+    color: var(--destaque);
+    font-size: 15px;
+    letter-spacing: 2px;
+    margin: 2px 0;
+    text-transform: uppercase;
+  }
+  .corpo {
+    padding: 14px 4px 30px;
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .corpo p { margin: 0 0 14px; }
+  .destaque-texto { color: var(--destaque); }
+  .erro-texto { color: var(--erro); }
+  .opcao {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: var(--fundo-caixa);
+    border: 1px solid var(--linha);
+    color: var(--texto);
+    font-family: inherit;
+    font-size: 15px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    border-radius: 2px;
+  }
+  .opcao:active, .opcao:focus-visible {
+    border-color: var(--destaque);
+    color: var(--destaque);
+    outline: none;
+  }
+  .rotulo { color: var(--destaque); margin-right: 8px; }
+  input[type=text] {
+    width: 100%;
+    background: var(--fundo-caixa);
+    border: 1px solid var(--linha);
+    color: var(--destaque);
+    font-family: inherit;
+    font-size: 15px;
+    padding: 10px 12px;
+    margin: 10px 0;
+    border-radius: 2px;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--destaque); }
+  #cursor {
+    display: inline-block;
+    width: 8px;
+    background: var(--destaque);
+    animation: piscar 1s step-start infinite;
+  }
+  @keyframes piscar { 50% { opacity: 0; } }
+  .rodape-dica { color: var(--linha); font-size: 12px; margin-top: 18px; }
+</style>
+</head>
+<body>
+<div id="tela"></div>
+
+<script>
+const BASE = "";
+const LARGURA = 38;
+
+const CONFIG = { velocidade: 18 };
+
+// ================= UTIL: DIGITAR =================
+
+function pausar(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function digitar(container, texto, classe) {
+  const span = document.createElement("span");
+  if (classe) span.className = classe;
+  container.appendChild(span);
+  let pulando = false;
+  const aoClicar = () => { pulando = true; };
+  document.addEventListener("click", aoClicar, { once: true });
+  document.addEventListener("keydown", aoClicar, { once: true });
+  for (const letra of texto) {
+    if (pulando) { span.textContent = texto; break; }
+    span.textContent += letra;
+    await pausar(CONFIG.velocidade);
+  }
+  document.removeEventListener("click", aoClicar);
+  document.removeEventListener("keydown", aoClicar);
+  return span;
+}
+
+async function digitarParagrafo(container, texto, classe) {
+  const p = document.createElement("p");
+  container.appendChild(p);
+  await digitar(p, texto, classe);
+}
+
+function linhaOrnamento(caractere) {
+  const div = document.createElement("div");
+  div.className = "linha-topo";
+  div.textContent = caractere.repeat(LARGURA);
+  return div;
+}
+
+function cabecalho(titulo) {
+  const tela = document.getElementById("tela");
+  tela.innerHTML = "";
+  tela.appendChild(linhaOrnamento("="));
+  const h1 = document.createElement("h1");
+  h1.className = "cabecalho";
+  h1.textContent = titulo;
+  tela.appendChild(h1);
+  tela.appendChild(linhaOrnamento("="));
+  const corpo = document.createElement("div");
+  corpo.className = "corpo";
+  tela.appendChild(corpo);
+  return corpo;
+}
+
+// ================= FETCH DE ARQUIVOS =================
+
+async function buscarTexto(caminho) {
+  const resposta = await fetch(BASE + caminho, { cache: "no-store" });
+  if (!resposta.ok) throw new Error("Não encontrei: " + caminho);
+  return await resposta.text();
+}
+
+async function buscarLista(caminho) {
+  const texto = await buscarTexto(caminho);
+  return texto.split(/\r\n|\r|\n/).map(l => l.trim()).filter(l => l !== "");
+}
+
+// ================= PARSER DE QUESTÕES =================
+
+function carregarQuestoes(texto) {
+  const linhas = texto.split(/\r\n|\r|\n/).map(l => l.trim());
+  const questoes = [];
+  let questao = { textos: [], item: "", alternativas: [], resposta: "" };
+  let marcador = "";
+  const padraoAlternativa = /^([A-Ea-e1-5])\s*[)\.:\-]\s*(.*)$/;
+
+  for (const linha of linhas) {
+    if (linha === "===") {
+      if (questao.item !== "") questoes.push(questao);
+      questao = { textos: [], item: "", alternativas: [], resposta: "" };
+      marcador = "";
+    } else if (linha === "TEXTO:") {
+      marcador = "texto";
+      questao.textos.push("");
+    } else if (linha === "ITEM:") {
+      marcador = "item";
+      questao.item = "";
+    } else if (padraoAlternativa.test(linha)) {
+      marcador = "alternativa";
+      const m = linha.match(padraoAlternativa);
+      questao.alternativas.push({ rotulo: m[1], texto: m[2].trim() });
+    } else if (linha === "RESPOSTA:") {
+      marcador = "resposta";
+    } else if (linha === "") {
+      if (marcador === "texto" && questao.textos[questao.textos.length - 1] !== "") {
+        questao.textos[questao.textos.length - 1] += "\n";
+      } else if (marcador === "item" && questao.item !== "") {
+        questao.item += "\n";
+      }
+    } else {
+      if (marcador === "texto") {
+        const i = questao.textos.length - 1;
+        questao.textos[i] = questao.textos[i] === "" ? linha : questao.textos[i] + "\n" + linha;
+      } else if (marcador === "item") {
+        questao.item = questao.item === "" ? linha : questao.item + "\n" + linha;
+      } else if (marcador === "alternativa") {
+        const i = questao.alternativas.length - 1;
+        questao.alternativas[i].texto = questao.alternativas[i].texto === "" ? linha : questao.alternativas[i].texto + "\n" + linha;
+      } else if (marcador === "resposta") {
+        questao.resposta = questao.resposta === "" ? linha : questao.resposta + "\n" + linha;
+      }
+    }
+  }
+  if (questao.item !== "") questoes.push(questao);
+  return questoes;
+}
+
+function normalizarAlternativa(valor) {
+  if (!valor) return null;
+  valor = valor.trim().toUpperCase().replace(/[.):\s\-]/g, "");
+  if (valor === "") return null;
+  const mapa = { A: "1", B: "2", C: "3", D: "4", E: "5" };
+  if (mapa[valor]) return mapa[valor];
+  if (/^\d+$/.test(valor)) return valor;
+  return null;
+}
+
+function embaralhar(lista) {
+  const copia = lista.slice();
+  for (let i = copia.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copia[i], copia[j]] = [copia[j], copia[i]];
+  }
+  return copia;
+}
+
+// ================= TELAS =================
+
+async function telaIntro() {
+  const corpo = cabecalho("Quiz Literário");
+  try {
+    const texto = await buscarTexto("telas/intro.txt");
+    for (const linha of texto.split(/\r\n|\r|\n/)) {
+      if (linha.trim() !== "") await digitarParagrafo(corpo, linha);
+    }
+  } catch (e) {
+    await digitarParagrafo(corpo, "Pressione para começar.");
+  }
+  const dica = document.createElement("p");
+  dica.className = "rodape-dica";
+  dica.textContent = "toque na tela para continuar";
+  corpo.appendChild(dica);
+  await new Promise(resolver => {
+    const ir = () => resolver();
+    document.addEventListener("click", ir, { once: true });
+  });
+  telaMenu();
+}
+
+async function telaMenu() {
+  const corpo = cabecalho("Menu");
+  const opcoes = [
+    { rotulo: "Jogar", acao: telaCategorias },
+    { rotulo: "Créditos", acao: telaCreditos },
+  ];
+  for (const opcao of opcoes) {
+    const botao = document.createElement("button");
+    botao.className = "opcao";
+    botao.innerHTML = '<span class="rotulo">›</span>' + opcao.rotulo;
+    botao.onclick = () => opcao.acao();
+    corpo.appendChild(botao);
+  }
+}
+
+async function telaCreditos() {
+  const corpo = cabecalho("Créditos");
+  try {
+    const texto = await buscarTexto("telas/creditos.txt");
+    for (const linha of texto.split(/\r\n|\r|\n/)) {
+      if (linha.trim() !== "") await digitarParagrafo(corpo, linha);
+    }
+  } catch (e) {
+    await digitarParagrafo(corpo, "Sem créditos cadastrados.");
+  }
+  const voltar = document.createElement("button");
+  voltar.className = "opcao";
+  voltar.textContent = "Voltar";
+  voltar.onclick = () => telaMenu();
+  corpo.appendChild(voltar);
+}
+
+async function telaCategorias() {
+  const corpo = cabecalho("Categorias");
+  let arquivos = [];
+  try {
+    arquivos = await buscarLista("perguntas/lista.txt");
+  } catch (e) {
+    await digitarParagrafo(corpo, "Não encontrei perguntas/lista.txt.", "erro-texto");
+    return;
+  }
+  for (const arquivo of arquivos) {
+    const nome = arquivo.replace(".txt", "");
+    const botao = document.createElement("button");
+    botao.className = "opcao";
+    botao.innerHTML = '<span class="rotulo">›</span>' + nome;
+    botao.onclick = () => telaQuiz(arquivo);
+    corpo.appendChild(botao);
+  }
+  const voltar = document.createElement("button");
+  voltar.className = "opcao";
+  voltar.textContent = "Voltar";
+  voltar.onclick = () => telaMenu();
+  corpo.appendChild(voltar);
+}
+
+async function telaQuiz(arquivo) {
+  const corpo = cabecalho("Quiz Literário");
+  let perguntas;
+  try {
+    const texto = await buscarTexto("perguntas/" + arquivo);
+    perguntas = carregarQuestoes(texto);
+  } catch (e) {
+    await digitarParagrafo(corpo, "Não consegui carregar esse quiz.", "erro-texto");
+    return;
+  }
+  if (perguntas.length === 0) {
+    await digitarParagrafo(corpo, "Nenhuma pergunta encontrada nesse arquivo.", "erro-texto");
+    return;
+  }
+
+  const total = perguntas.length;
+  const valorQuestao = 10 / total;
+  const ordem = embaralhar(perguntas);
+  let nota = 0;
+  let acertos = 0;
+  const erros = [];
+
+  for (let indice = 0; indice < ordem.length; indice++) {
+    const questao = ordem[indice];
+    const corpoQ = cabecalho("Quiz Literário");
+
+    const status = document.createElement("p");
+    status.className = "destaque-texto";
+    status.textContent = `Questão ${indice + 1} de ${total} — Nota atual: ${nota.toFixed(1)}`;
+    corpoQ.appendChild(status);
+    corpoQ.appendChild(linhaOrnamento("-"));
+
+    for (const texto of questao.textos) {
+      if (texto.trim() !== "") await digitarParagrafo(corpoQ, texto);
+    }
+    await digitarParagrafo(corpoQ, questao.item, "destaque-texto");
+
+    const respostaEscolhida = await new Promise(resolver => {
+      for (const alternativa of questao.alternativas) {
+        const botao = document.createElement("button");
+        botao.className = "opcao";
+        botao.innerHTML = '<span class="rotulo">' + alternativa.rotulo + '</span>' + alternativa.texto;
+        botao.onclick = () => resolver(alternativa.rotulo);
+        corpoQ.appendChild(botao);
+      }
+      const campo = document.createElement("input");
+      campo.type = "text";
+      campo.placeholder = "ou digite a letra/número aqui";
+      campo.onkeydown = (ev) => { if (ev.key === "Enter" && campo.value.trim() !== "") resolver(campo.value); };
+      corpoQ.appendChild(campo);
+    });
+
+    const respostaUsuario = normalizarAlternativa(respostaEscolhida);
+    const respostaCerta = normalizarAlternativa(questao.resposta);
+    const acertou = respostaUsuario !== null && respostaUsuario === respostaCerta;
+
+    const feedback = document.createElement("p");
+    if (acertou) {
+      nota += valorQuestao;
+      acertos += 1;
+      feedback.textContent = "Correto!";
+      feedback.className = "destaque-texto";
+    } else {
+      feedback.textContent = "Errado!";
+      feedback.className = "erro-texto";
+      const indiceCerta = respostaCerta ? parseInt(respostaCerta, 10) - 1 : -1;
+      const alternativaCerta = questao.alternativas[indiceCerta];
+      erros.push({
+        item: questao.item,
+        rotulo: alternativaCerta ? alternativaCerta.rotulo : "?",
+        texto: alternativaCerta ? alternativaCerta.texto : "",
+      });
+    }
+    corpoQ.appendChild(feedback);
+
+    const continuar = document.createElement("button");
+    continuar.className = "opcao";
+    continuar.textContent = "Continuar";
+    corpoQ.appendChild(continuar);
+    await new Promise(resolver => { continuar.onclick = resolver; });
+  }
+
+  await telaResultado(nota, acertos, total, erros);
+}
+
+async function telaResultado(nota, acertos, total, erros) {
+  const corpo = cabecalho("Resultado");
+  await digitarParagrafo(corpo, `Nota final: ${nota.toFixed(2)}`, "destaque-texto");
+  await digitarParagrafo(corpo, `Acertos: ${acertos} de ${total}`);
+
+  if (erros.length > 0) {
+    corpo.appendChild(linhaOrnamento("-"));
+    await digitarParagrafo(corpo, "Revisão:", "destaque-texto");
+    for (const erro of erros) {
+      await digitarParagrafo(corpo, erro.item);
+      await digitarParagrafo(corpo, `Resposta certa: ${erro.rotulo} - ${erro.texto}`);
+    }
+  }
+
+  const menuBtn = document.createElement("button");
+  menuBtn.className = "opcao";
+  menuBtn.textContent = "Voltar ao início";
+  menuBtn.onclick = () => telaMenu();
+  corpo.appendChild(menuBtn);
+}
+
+telaIntro();
+</script>
+</body>
+</html>
