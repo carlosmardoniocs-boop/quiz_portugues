@@ -1,0 +1,5 @@
+figuras.txt
+gramática.txt
+literatura.txt
+interpretação.txt
+nada.txt
