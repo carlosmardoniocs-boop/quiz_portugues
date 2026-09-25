@@ -1,0 +1,51 @@
+ITEM:
+Quem escreveu Dom Casmurro?
+
+a: José de Alencar
+b: Machado de Assis
+c: Monteiro Lobato
+d: Graciliano Ramos
+
+RESPOSTA:
+b
+
+===
+
+ITEM:
+Quem escreveu Iracema?
+
+a: José de Alencar
+b: Machado de Assis
+c: Monteiro Lobato
+d: Graciliano Ramos
+
+RESPOSTA:
+a
+
+===
+
+ITEM:
+Quem escreveu Reinações de Narizinho?
+
+a: José de Alencar
+b: Machado de Assis
+c: Monteiro Lobato
+d: Graciliano Ramos
+
+RESPOSTA:
+c
+
+===
+
+ITEM:
+Quem escreveu Vidas Secas?
+
+a: José de Alencar
+b: Machado de Assis
+c: Monteiro Lobato
+d: Graciliano Ramos
+
+RESPOSTA:
+d
+
+===
