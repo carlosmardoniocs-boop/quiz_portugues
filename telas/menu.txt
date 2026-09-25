@@ -1,0 +1,8 @@
+
+1 - Jogar
+
+2 - Configurações 
+
+3 - Créditos
+
+4 - Sair
