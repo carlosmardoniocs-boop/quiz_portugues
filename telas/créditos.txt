@@ -1,0 +1,10 @@
+Sistema modular de Quiz interativo 
+
+Projeto criado em:
+Python
+
+Desenvolvido por:
+Carlos 
+
+Aplicado por:
+Mardônio
