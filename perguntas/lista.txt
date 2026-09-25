@@ -1,5 +1,5 @@
 figuras.txt
 gramática.txt
-literatura.txt
 interpretação.txt
+literatura.txt
 nada.txt
