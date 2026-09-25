@@ -1,0 +1,31 @@
+TEXTO:
+Nada para nada é igual a nada.
+
+ITEM:
+Se nada para nada é nada, o que seria nada para nada?
+
+a) Nada
+b) Tudo
+c) Quase nada
+d) De nada
+e) NDA
+
+RESPOSTA:
+e
+
+===
+
+TEXTO:
+Cuidado com a coisa coisando por aí. A coisa coisa sempre e também coisa por aqui.
+
+ITEM:
+A coisa se classifica como
+
+a) verbo
+b) substantivo
+c) palavrão 
+
+RESPOSTA:
+c
+
+===
