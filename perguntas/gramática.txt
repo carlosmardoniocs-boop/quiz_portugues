@@ -1,0 +1,179 @@
+TEXTO:
+Leia a frase abaixo:
+
+“Os alunos inteligentes chegaram cedo.”
+
+ITEM:
+Qual é a classe gramatical da palavra “Os”?
+
+A- Substantivo
+B- Artigo
+C- Verbo
+D- Adjetivo
+
+RESPOSTA:
+B
+
+===
+
+TEXTO:
+Leia novamente a frase:
+
+“Os alunos inteligentes chegaram cedo.”
+
+ITEM:
+Qual é a classe gramatical da palavra “alunos”?
+
+A- Verbo
+B- Adjetivo
+C- Substantivo
+D- Advérbio
+
+RESPOSTA:
+C
+
+===
+
+TEXTO:
+Observe a oração abaixo:
+
+“Os alunos inteligentes chegaram cedo.”
+
+ITEM:
+Qual é a classe gramatical da palavra “chegaram”?
+
+A- Verbo
+B- Artigo
+C- Substantivo
+D- Pronome
+
+RESPOSTA:
+A
+
+===
+
+TEXTO:
+Leia a frase abaixo:
+
+“Os alunos inteligentes chegaram cedo.”
+
+ITEM:
+Qual é a classe gramatical da palavra “inteligentes”?
+
+A- Substantivo 
+B- Artigo
+C- Pronome
+D- Adjetivo
+
+RESPOSTA:
+D
+
+===
+
+TEXTO:
+Leia a frase abaixo:
+
+“Os alunos inteligentes chegaram cedo.”
+
+ITEM:
+Qual é a classe gramatical da palavra “cedo”?
+
+A- Adjetivo
+B- Substantivo
+C- Advérbio
+D- Verbo
+
+RESPOSTA:
+C
+
+===
+
+TEXTO:
+Leia a frase abaixo:
+
+“Amigos verdadeiros estão sempre atentos.”
+
+ITEM:
+Qual é a classe gramatical da palavra “verdadeiros”?
+
+A- Adjetivo
+B- Substantivo
+C- Advérbio
+D- Verbo
+
+RESPOSTA:
+A
+
+===
+
+TEXTO:
+Leia a frase abaixo:
+
+“Amigos verdadeiros estão sempre atentos.”
+
+ITEM:
+Qual é a classe gramatical da palavra “verdadeiros”?
+
+A- Adjunto adnominal
+B- Complemento nominal
+C- Núcleo do sujeito
+D- Verbo de ligação 
+
+RESPOSTA:
+A
+
+===
+
+TEXTO:
+Leia a frase abaixo:
+
+“Amigos verdadeiros estão sempre atentos.”
+
+ITEM:
+Qual é a classe gramatical da palavra “atentos”?
+
+A- Agente da passiva
+B- Predicativo do sujeito
+C- Aposto
+D- Complemento verbal
+
+RESPOSTA:
+B
+
+===
+
+TEXTO:
+Leia a frase abaixo:
+
+“Amigos verdadeiros estão sempre atentos.”
+
+ITEM:
+Qual é a classe gramatical da palavra “Amigos”?
+
+A- Vocativo
+B- Núcleo do sujeito
+C- Adjunto adnominal
+D- Objeto direto
+
+RESPOSTA:
+B
+
+===
+
+TEXTO:
+Leia a frase abaixo:
+
+“Amigos verdadeiros estão sempre atentos.”
+
+ITEM:
+Qual é a classe gramatical da palavra “estão ”?
+
+A- Verbo sigficativo
+B- Verbo bitransitivo 
+C- Verbo de ligação 
+D- Verbo inexistente 
+
+RESPOSTA:
+C
+
+===
