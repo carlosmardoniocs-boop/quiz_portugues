@@ -78,9 +78,11 @@
   input[type=text]:focus { outline: none; border-color: var(--destaque); }
   .rodape-dica { color: var(--linha); font-size: 12px; margin-top: 18px; }
 </style>
+<script src="https://cdn.jsdelivr.net/combine/npm/tone@14.7.58,npm/@magenta/music@1.23.1/es6/core.js,npm/html-midi-player@1.5.0"></script>
 </head>
 <body class="tema-fosforo">
 <div id="tela"></div>
+<midi-player id="trilha" loop style="display:none"></midi-player>
 
 <script>
 const LARGURA = 38;
@@ -135,6 +137,42 @@ function somTecla() { tocarTom(1046, 0.03); }
 function somConfirmar() { tocarTom(660, 0.05); }
 function somAcerto() { tocarTom(660, 0.09); setTimeout(() => tocarTom(990, 0.12), 90); }
 function somErro() { tocarTom(150, 0.25); }
+
+// ================= TRILHA SONORA (MIDI) =================
+
+let listaTrilhas = ["Sem música"];
+let indiceTrilha = 0;
+
+async function carregarTrilhas() {
+  try {
+    const nomes = await buscarLista("trilhas/lista.txt");
+    listaTrilhas = ["Sem música", ...nomes];
+  } catch (e) {
+    listaTrilhas = ["Sem música"];
+  }
+}
+
+function aplicarTrilha() {
+  const player = document.getElementById("trilha");
+  try { player.stop(); } catch (e) {}
+  if (indiceTrilha === 0) {
+    player.removeAttribute("src");
+  } else {
+    player.loop = true;
+    player.src = "trilhas/" + listaTrilhas[indiceTrilha];
+  }
+}
+
+function mudarTrilha(direcao) {
+  indiceTrilha = (indiceTrilha + direcao + listaTrilhas.length) % listaTrilhas.length;
+  aplicarTrilha();
+}
+
+document.getElementById("trilha").addEventListener("load", () => {
+  if (indiceTrilha !== 0) {
+    try { document.getElementById("trilha").start(); } catch (e) {}
+  }
+});
 
 // ================= UTIL: DIGITAR =================
 
@@ -302,7 +340,11 @@ async function telaIntro() {
   dica.textContent = "toque na tela para continuar";
   corpo.appendChild(dica);
   await new Promise(resolver => {
-    document.addEventListener("click", () => { iniciarAudio(); resolver(); }, { once: true });
+    document.addEventListener("click", () => {
+      iniciarAudio();
+      try { if (window.Tone) Tone.start(); } catch (e) {}
+      resolver();
+    }, { once: true });
   });
   telaMenu();
 }
@@ -338,6 +380,55 @@ async function telaConfiguracoes() {
   for (const onda of ONDAS) {
     corpo.appendChild(criarBotao(onda.nome, () => { CONFIG.onda = onda.chave; telaConfiguracoes(); }, CONFIG.onda === onda.chave));
   }
+
+  const rotuloTrilha = document.createElement("p");
+  rotuloTrilha.className = "destaque-texto";
+  rotuloTrilha.textContent = "Trilha sonora:";
+  corpo.appendChild(rotuloTrilha);
+
+  const linhaTrilha = document.createElement("div");
+  linhaTrilha.className = "opcao";
+  linhaTrilha.style.display = "flex";
+  linhaTrilha.style.justifyContent = "space-between";
+  linhaTrilha.style.alignItems = "center";
+
+  const botaoAnterior = document.createElement("button");
+  botaoAnterior.textContent = "‹";
+  botaoAnterior.style.background = "none";
+  botaoAnterior.style.border = "none";
+  botaoAnterior.style.color = "var(--destaque)";
+  botaoAnterior.style.fontSize = "20px";
+  botaoAnterior.onclick = () => { somConfirmar(); mudarTrilha(-1); telaConfiguracoes(); };
+
+  const nomeTrilha = document.createElement("span");
+  nomeTrilha.textContent = listaTrilhas[indiceTrilha];
+
+  const botaoProximo = document.createElement("button");
+  botaoProximo.textContent = "›";
+  botaoProximo.style.background = "none";
+  botaoProximo.style.border = "none";
+  botaoProximo.style.color = "var(--destaque)";
+  botaoProximo.style.fontSize = "20px";
+  botaoProximo.onclick = () => { somConfirmar(); mudarTrilha(1); telaConfiguracoes(); };
+
+  linhaTrilha.appendChild(botaoAnterior);
+  linhaTrilha.appendChild(nomeTrilha);
+  linhaTrilha.appendChild(botaoProximo);
+
+  let toqueInicialX = null;
+  linhaTrilha.addEventListener("touchstart", (ev) => { toqueInicialX = ev.touches[0].clientX; });
+  linhaTrilha.addEventListener("touchend", (ev) => {
+    if (toqueInicialX === null) return;
+    const diferenca = ev.changedTouches[0].clientX - toqueInicialX;
+    if (Math.abs(diferenca) > 40) {
+      somConfirmar();
+      mudarTrilha(diferenca < 0 ? 1 : -1);
+      telaConfiguracoes();
+    }
+    toqueInicialX = null;
+  });
+
+  corpo.appendChild(linhaTrilha);
 
   corpo.appendChild(criarBotao("Voltar", telaMenu));
 }
@@ -472,6 +563,7 @@ async function telaResultado(nota, acertos, total, erros) {
 }
 
 aplicarTema(CONFIG.tema);
+carregarTrilhas();
 telaIntro();
 </script>
 </body>
