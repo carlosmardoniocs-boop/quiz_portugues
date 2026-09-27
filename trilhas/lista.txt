@@ -1,2 +1,2 @@
-música 1.mid
-música 2.mid
+The_Beatles_-_Blackbird.mid
+trilhas/The_Beatles_-_Yesterday.mid
