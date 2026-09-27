@@ -6,19 +6,17 @@
 <title>Quiz Literário</title>
 <style>
   :root {
-    --fundo: #0b0f0d;
-    --fundo-caixa: #0f1512;
-    --linha: #1f3d2a;
-    --texto: #8fd7a8;
-    --destaque: #4dff88;
-    --erro: #ff6b6b;
-    --acerto: #4dff88;
     box-sizing: border-box;
     padding-top: env(safe-area-inset-top, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   * { box-sizing: border-box; }
   html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+
+  body.tema-fosforo { --fundo:#0b0f0d; --fundo-caixa:#0f1512; --linha:#1f3d2a; --texto:#8fd7a8; --destaque:#4dff88; --erro:#ff6b6b; }
+  body.tema-ambar   { --fundo:#140d04; --fundo-caixa:#1d1407; --linha:#5a3c12; --texto:#d99a3f; --destaque:#ffb000; --erro:#ff7a5c; }
+  body.tema-dos     { --fundo:#050f4d; --fundo-caixa:#0a1a63; --linha:#25368f; --texto:#c7d3ff; --destaque:#ffffff; --erro:#ff6b6b; }
+
   body {
     margin: 0;
     min-height: 100%;
@@ -29,11 +27,8 @@
     justify-content: center;
     padding: 24px 14px;
   }
-  #tela {
-    width: 100%;
-    max-width: 640px;
-  }
-  .linha-topo, .linha-base {
+  #tela { width: 100%; max-width: 640px; }
+  .linha-topo {
     color: var(--linha);
     white-space: pre;
     overflow-x: auto;
@@ -48,11 +43,7 @@
     margin: 2px 0;
     text-transform: uppercase;
   }
-  .corpo {
-    padding: 14px 4px 30px;
-    line-height: 1.6;
-    font-size: 15px;
-  }
+  .corpo { padding: 14px 4px 30px; line-height: 1.6; font-size: 15px; }
   .corpo p { margin: 0 0 14px; }
   .destaque-texto { color: var(--destaque); }
   .erro-texto { color: var(--erro); }
@@ -70,11 +61,8 @@
     cursor: pointer;
     border-radius: 2px;
   }
-  .opcao:active, .opcao:focus-visible {
-    border-color: var(--destaque);
-    color: var(--destaque);
-    outline: none;
-  }
+  .opcao.selecionada { border-color: var(--destaque); color: var(--destaque); }
+  .opcao:active, .opcao:focus-visible { border-color: var(--destaque); color: var(--destaque); outline: none; }
   .rotulo { color: var(--destaque); margin-right: 8px; }
   input[type=text] {
     width: 100%;
@@ -88,24 +76,65 @@
     border-radius: 2px;
   }
   input[type=text]:focus { outline: none; border-color: var(--destaque); }
-  #cursor {
-    display: inline-block;
-    width: 8px;
-    background: var(--destaque);
-    animation: piscar 1s step-start infinite;
-  }
-  @keyframes piscar { 50% { opacity: 0; } }
   .rodape-dica { color: var(--linha); font-size: 12px; margin-top: 18px; }
 </style>
 </head>
-<body>
+<body class="tema-fosforo">
 <div id="tela"></div>
 
 <script>
-const BASE = "";
 const LARGURA = 38;
 
-const CONFIG = { velocidade: 18 };
+const CONFIG = { velocidade: 18, tema: "fosforo", som: true, onda: "square" };
+
+const TEMAS = [
+  { chave: "fosforo", nome: "Fósforo Verde" },
+  { chave: "ambar", nome: "Âmbar" },
+  { chave: "dos", nome: "DOS Azul" },
+];
+
+const ONDAS = [
+  { chave: "square", nome: "Quadrada" },
+  { chave: "triangle", nome: "Triangular" },
+  { chave: "sawtooth", nome: "Serrilhada" },
+];
+
+function aplicarTema(chave) {
+  CONFIG.tema = chave;
+  document.body.className = "tema-" + chave;
+}
+
+// ================= SOM (Web Audio API - sem nenhum arquivo de áudio) =================
+
+let audioCtx = null;
+
+function iniciarAudio() {
+  if (audioCtx) return;
+  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+  catch (e) { audioCtx = null; }
+}
+
+function tocarTom(frequencia, duracao, tipoOnda) {
+  if (!CONFIG.som || !audioCtx) return;
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  try {
+    const osc = audioCtx.createOscillator();
+    const ganho = audioCtx.createGain();
+    osc.type = tipoOnda || CONFIG.onda;
+    osc.frequency.value = frequencia;
+    const agora = audioCtx.currentTime;
+    ganho.gain.setValueAtTime(0.18, agora);
+    ganho.gain.exponentialRampToValueAtTime(0.001, agora + duracao);
+    osc.connect(ganho).connect(audioCtx.destination);
+    osc.start(agora);
+    osc.stop(agora + duracao);
+  } catch (e) {}
+}
+
+function somTecla() { tocarTom(1046, 0.03); }
+function somConfirmar() { tocarTom(660, 0.05); }
+function somAcerto() { tocarTom(660, 0.09); setTimeout(() => tocarTom(990, 0.12), 90); }
+function somErro() { tocarTom(150, 0.25); }
 
 // ================= UTIL: DIGITAR =================
 
@@ -123,9 +152,13 @@ async function digitar(container, texto, classe) {
   const aoClicar = () => { PULAR_TELA = true; };
   document.addEventListener("click", aoClicar, { once: true });
   document.addEventListener("keydown", aoClicar, { once: true });
+
+  let contador = 0;
   for (const letra of texto) {
     if (PULAR_TELA) { span.textContent = texto; break; }
     span.textContent += letra;
+    contador++;
+    if (contador % 2 === 0) somTecla();
     await pausar(CONFIG.velocidade);
   }
   document.removeEventListener("click", aoClicar);
@@ -162,10 +195,18 @@ function cabecalho(titulo) {
   return corpo;
 }
 
+function criarBotao(html, aoClicar, selecionada) {
+  const botao = document.createElement("button");
+  botao.className = "opcao" + (selecionada ? " selecionada" : "");
+  botao.innerHTML = html;
+  botao.onclick = () => { somConfirmar(); aoClicar(); };
+  return botao;
+}
+
 // ================= FETCH DE ARQUIVOS =================
 
 async function buscarTexto(caminho) {
-  const resposta = await fetch(BASE + caminho, { cache: "no-store" });
+  const resposta = await fetch(caminho, { cache: "no-store" });
   if (!resposta.ok) throw new Error("Não encontrei: " + caminho);
   return await resposta.text();
 }
@@ -261,25 +302,44 @@ async function telaIntro() {
   dica.textContent = "toque na tela para continuar";
   corpo.appendChild(dica);
   await new Promise(resolver => {
-    const ir = () => resolver();
-    document.addEventListener("click", ir, { once: true });
+    document.addEventListener("click", () => { iniciarAudio(); resolver(); }, { once: true });
   });
   telaMenu();
 }
 
 async function telaMenu() {
   const corpo = cabecalho("Menu");
-  const opcoes = [
-    { rotulo: "Jogar", acao: telaCategorias },
-    { rotulo: "Créditos", acao: telaCreditos },
-  ];
-  for (const opcao of opcoes) {
-    const botao = document.createElement("button");
-    botao.className = "opcao";
-    botao.innerHTML = '<span class="rotulo">›</span>' + opcao.rotulo;
-    botao.onclick = () => opcao.acao();
-    corpo.appendChild(botao);
+  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Jogar', telaCategorias));
+  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Configurações', telaConfiguracoes));
+  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Créditos', telaCreditos));
+}
+
+async function telaConfiguracoes() {
+  const corpo = cabecalho("Configurações");
+
+  const rotuloTema = document.createElement("p");
+  rotuloTema.className = "destaque-texto";
+  rotuloTema.textContent = "Tema:";
+  corpo.appendChild(rotuloTema);
+  for (const tema of TEMAS) {
+    corpo.appendChild(criarBotao(tema.nome, () => { aplicarTema(tema.chave); telaConfiguracoes(); }, CONFIG.tema === tema.chave));
   }
+
+  const rotuloSom = document.createElement("p");
+  rotuloSom.className = "destaque-texto";
+  rotuloSom.textContent = "Som:";
+  corpo.appendChild(rotuloSom);
+  corpo.appendChild(criarBotao(CONFIG.som ? "Ligado" : "Desligado", () => { CONFIG.som = !CONFIG.som; telaConfiguracoes(); }));
+
+  const rotuloOnda = document.createElement("p");
+  rotuloOnda.className = "destaque-texto";
+  rotuloOnda.textContent = "Tipo de onda:";
+  corpo.appendChild(rotuloOnda);
+  for (const onda of ONDAS) {
+    corpo.appendChild(criarBotao(onda.nome, () => { CONFIG.onda = onda.chave; telaConfiguracoes(); }, CONFIG.onda === onda.chave));
+  }
+
+  corpo.appendChild(criarBotao("Voltar", telaMenu));
 }
 
 async function telaCreditos() {
@@ -292,11 +352,7 @@ async function telaCreditos() {
   } catch (e) {
     await digitarParagrafo(corpo, "Sem créditos cadastrados.");
   }
-  const voltar = document.createElement("button");
-  voltar.className = "opcao";
-  voltar.textContent = "Voltar";
-  voltar.onclick = () => telaMenu();
-  corpo.appendChild(voltar);
+  corpo.appendChild(criarBotao("Voltar", telaMenu));
 }
 
 async function telaCategorias() {
@@ -310,17 +366,9 @@ async function telaCategorias() {
   }
   for (const arquivo of arquivos) {
     const nome = arquivo.replace(".txt", "");
-    const botao = document.createElement("button");
-    botao.className = "opcao";
-    botao.innerHTML = '<span class="rotulo">›</span>' + nome;
-    botao.onclick = () => telaQuiz(arquivo);
-    corpo.appendChild(botao);
+    corpo.appendChild(criarBotao('<span class="rotulo">›</span>' + nome, () => telaQuiz(arquivo)));
   }
-  const voltar = document.createElement("button");
-  voltar.className = "opcao";
-  voltar.textContent = "Voltar";
-  voltar.onclick = () => telaMenu();
-  corpo.appendChild(voltar);
+  corpo.appendChild(criarBotao("Voltar", telaMenu));
 }
 
 async function telaQuiz(arquivo) {
@@ -362,11 +410,7 @@ async function telaQuiz(arquivo) {
 
     const respostaEscolhida = await new Promise(resolver => {
       for (const alternativa of questao.alternativas) {
-        const botao = document.createElement("button");
-        botao.className = "opcao";
-        botao.innerHTML = '<span class="rotulo">' + alternativa.rotulo + '</span>' + alternativa.texto;
-        botao.onclick = () => resolver(alternativa.rotulo);
-        corpoQ.appendChild(botao);
+        corpoQ.appendChild(criarBotao('<span class="rotulo">' + alternativa.rotulo + '</span>' + alternativa.texto, () => resolver(alternativa.rotulo)));
       }
       const campo = document.createElement("input");
       campo.type = "text";
@@ -387,9 +431,11 @@ async function telaQuiz(arquivo) {
       acertos += 1;
       feedback.textContent = "Correto!";
       feedback.className = "destaque-texto";
+      somAcerto();
     } else {
       feedback.textContent = "Errado!";
       feedback.className = "erro-texto";
+      somErro();
       const indiceCerta = respostaCerta ? parseInt(respostaCerta, 10) - 1 : -1;
       const alternativaCerta = questao.alternativas[indiceCerta];
       erros.push({
@@ -400,11 +446,9 @@ async function telaQuiz(arquivo) {
     }
     corpoQ.appendChild(feedback);
 
-    const continuar = document.createElement("button");
-    continuar.className = "opcao";
-    continuar.textContent = "Continuar";
-    corpoQ.appendChild(continuar);
-    await new Promise(resolver => { continuar.onclick = resolver; });
+    await new Promise(resolver => {
+      corpoQ.appendChild(criarBotao("Continuar", resolver));
+    });
   }
 
   await telaResultado(nota, acertos, total, erros);
@@ -424,13 +468,10 @@ async function telaResultado(nota, acertos, total, erros) {
     }
   }
 
-  const menuBtn = document.createElement("button");
-  menuBtn.className = "opcao";
-  menuBtn.textContent = "Voltar ao início";
-  menuBtn.onclick = () => telaMenu();
-  corpo.appendChild(menuBtn);
+  corpo.appendChild(criarBotao("Voltar ao início", telaMenu));
 }
 
+aplicarTema(CONFIG.tema);
 telaIntro();
 </script>
 </body>
