@@ -111,16 +111,20 @@ const CONFIG = { velocidade: 18 };
 
 function pausar(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+let PULAR_TELA = false;
+
 async function digitar(container, texto, classe) {
   const span = document.createElement("span");
   if (classe) span.className = classe;
   container.appendChild(span);
-  let pulando = false;
-  const aoClicar = () => { pulando = true; };
+
+  if (PULAR_TELA) { span.textContent = texto; return span; }
+
+  const aoClicar = () => { PULAR_TELA = true; };
   document.addEventListener("click", aoClicar, { once: true });
   document.addEventListener("keydown", aoClicar, { once: true });
   for (const letra of texto) {
-    if (pulando) { span.textContent = texto; break; }
+    if (PULAR_TELA) { span.textContent = texto; break; }
     span.textContent += letra;
     await pausar(CONFIG.velocidade);
   }
@@ -143,6 +147,7 @@ function linhaOrnamento(caractere) {
 }
 
 function cabecalho(titulo) {
+  PULAR_TELA = false;
   const tela = document.getElementById("tela");
   tela.innerHTML = "";
   tela.appendChild(linhaOrnamento("="));
@@ -366,8 +371,10 @@ async function telaQuiz(arquivo) {
       const campo = document.createElement("input");
       campo.type = "text";
       campo.placeholder = "ou digite a letra/número aqui";
+      campo.autocomplete = "off";
       campo.onkeydown = (ev) => { if (ev.key === "Enter" && campo.value.trim() !== "") resolver(campo.value); };
       corpoQ.appendChild(campo);
+      setTimeout(() => campo.focus(), 50);
     });
 
     const respostaUsuario = normalizarAlternativa(respostaEscolhida);
