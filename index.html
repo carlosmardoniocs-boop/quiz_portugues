@@ -29,3 +29,761 @@
   }
   #tela { width: 100%; max-width: 640px; }
   .linha-topo {
+    color: var(--linha);
+    white-space: pre;
+    overflow-x: auto;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  h1.cabecalho {
+    text-align: center;
+    color: var(--destaque);
+    font-size: 15px;
+    letter-spacing: 2px;
+    margin: 2px 0;
+    text-transform: uppercase;
+  }
+  .corpo { padding: 14px 4px 30px; line-height: 1.6; font-size: 15px; }
+  .corpo p { margin: 0 0 14px; }
+  .destaque-texto { color: var(--destaque); }
+  .erro-texto { color: var(--erro); }
+  .opcao {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: var(--fundo-caixa);
+    border: 1px solid var(--linha);
+    color: var(--texto);
+    font-family: inherit;
+    font-size: 15px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    border-radius: 2px;
+  }
+  .opcao.selecionada { border-color: var(--destaque); color: var(--destaque); }
+  .opcao:active, .opcao:focus-visible { border-color: var(--destaque); color: var(--destaque); outline: none; }
+  .rotulo { color: var(--destaque); margin-right: 8px; }
+  input[type=text] {
+    width: 100%;
+    background: var(--fundo-caixa);
+    border: 1px solid var(--linha);
+    color: var(--destaque);
+    font-family: inherit;
+    font-size: 15px;
+    padding: 10px 12px;
+    margin: 10px 0;
+    border-radius: 2px;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--destaque); }
+  .rodape-dica { color: var(--linha); font-size: 12px; margin-top: 18px; }
+</style>
+<script defer src="https://cdn.jsdelivr.net/combine/npm/tone@14.7.58,npm/@magenta/music@1.23.1/es6/core.js,npm/html-midi-player@1.5.0"></script>
+</head>
+<body class="tema-fosforo">
+<div id="tela"></div>
+<midi-player id="trilha" loop style="display:none"></midi-player>
+
+<script>
+const LARGURA = 38;
+
+const CONFIG = { velocidade: 18, velocidadeChave: "media", tema: "fosforo", som: true, onda: "square" };
+
+const TEMAS = [
+  { chave: "fosforo", nome: "Fósforo Verde" },
+  { chave: "ambar", nome: "Âmbar" },
+  { chave: "dos", nome: "DOS Azul" },
+];
+
+const ONDAS = [
+  { chave: "square", nome: "Quadrada" },
+  { chave: "triangle", nome: "Triangular" },
+  { chave: "sawtooth", nome: "Serrilhada" },
+];
+
+const VELOCIDADES = [
+  { chave: "devagar", nome: "Devagar", ms: 40 },
+  { chave: "media", nome: "Média", ms: 18 },
+  { chave: "rapida", nome: "Rápida", ms: 7 },
+  { chave: "off", nome: "Sem efeito", ms: 0 },
+];
+
+function aplicarTema(chave) {
+  CONFIG.tema = chave;
+  document.body.className = "tema-" + chave;
+}
+
+// ================= SOM (Web Audio API - sem nenhum arquivo de áudio) =================
+
+let audioCtx = null;
+
+function iniciarAudio() {
+  if (audioCtx) return;
+  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+  catch (e) { audioCtx = null; }
+}
+
+const COMPENSACAO_ONDA = { square: 0.6, triangle: 1.0, sawtooth: 0.85 };
+
+function tocarTom(frequencia, duracao, tipoOnda, atraso, volume) {
+  if (!CONFIG.som || !audioCtx) return;
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  try {
+    const tipo = tipoOnda || CONFIG.onda;
+    const osc = audioCtx.createOscillator();
+    const ganho = audioCtx.createGain();
+    osc.type = tipo;
+    osc.frequency.value = frequencia;
+    const inicio = audioCtx.currentTime + (atraso || 0);
+    const pico = (volume || 0.18) * (COMPENSACAO_ONDA[tipo] || 1);
+    ganho.gain.setValueAtTime(pico, inicio);
+    ganho.gain.exponentialRampToValueAtTime(0.001, inicio + duracao);
+    osc.connect(ganho).connect(audioCtx.destination);
+    osc.start(inicio);
+    osc.stop(inicio + duracao);
+  } catch (e) {}
+}
+
+function somTecla() { tocarTom(1046, 0.03); }
+function somConfirmar() { tocarTom(660, 0.05); }
+function somAcerto() { tocarTom(523, 0.09); tocarTom(659, 0.09, null, 0.09); tocarTom(784, 0.2, null, 0.18); }
+function somErro() { tocarTom(392, 0.14, null, 0, 0.26); tocarTom(311, 0.14, null, 0.14, 0.26); tocarTom(233, 0.4, null, 0.28, 0.26); }
+function somPreviaOnda() { tocarTom(440, 0.14); tocarTom(554, 0.14, null, 0.14); tocarTom(659, 0.22, null, 0.28); }
+
+// ================= TRILHA SONORA (MIDI) =================
+
+let ALUNO_ATUAL = null;
+let ALUNO_TURMA = null;
+let ALUNO_REGISTRA = false;
+
+let listaTrilhas = ["Sem música"];
+let indiceTrilha = 0;
+
+async function carregarTrilhas() {
+  try {
+    const nomes = await buscarLista("trilhas/lista.txt");
+    listaTrilhas = ["Sem música", ...nomes];
+  } catch (e) {
+    listaTrilhas = ["Sem música"];
+  }
+}
+
+function aplicarTrilha() {
+  const player = document.getElementById("trilha");
+  try { player.stop(); } catch (e) {}
+  if (indiceTrilha === 0) {
+    player.removeAttribute("src");
+  } else {
+    player.loop = true;
+    player.src = "trilhas/" + listaTrilhas[indiceTrilha];
+  }
+}
+
+function mudarTrilha(direcao) {
+  indiceTrilha = (indiceTrilha + direcao + listaTrilhas.length) % listaTrilhas.length;
+  aplicarTrilha();
+}
+
+const elementoTrilha = document.getElementById("trilha");
+if (elementoTrilha) {
+  elementoTrilha.addEventListener("load", () => {
+    if (indiceTrilha !== 0) {
+      try { elementoTrilha.start(); } catch (e) {}
+    }
+  });
+}
+
+// ================= ENVIO DE RESULTADO (Google Formulários) =================
+
+const URL_FORMULARIO = "https://docs.google.com/forms/d/e/1FAIpQLScLDrLLX54jVbRQXbgF574nMWDrJYtPfavSNAO9q99QX2h2iQ/formResponse";
+
+const CAMPOS_FORMULARIO = {
+  aluno: "entry.1340836397",
+  turma: "entry.600643261",
+  quiz: "entry.2027672235",
+  respostas: "entry.200796650",
+  gabarito: "entry.676044839",
+  acertos: "entry.1711264550",
+  nota: "entry.2068175582",
+};
+
+async function enviarResultado(quiz, gabarito, respostas, acertos, nota) {
+  if (!ALUNO_REGISTRA) return;
+  try {
+    const dados = new URLSearchParams();
+    dados.append(CAMPOS_FORMULARIO.aluno, ALUNO_ATUAL || "");
+    dados.append(CAMPOS_FORMULARIO.turma, ALUNO_TURMA || "");
+    dados.append(CAMPOS_FORMULARIO.quiz, quiz);
+    dados.append(CAMPOS_FORMULARIO.respostas, respostas.join(","));
+    dados.append(CAMPOS_FORMULARIO.gabarito, gabarito.join(","));
+    dados.append(CAMPOS_FORMULARIO.acertos, String(acertos));
+    dados.append(CAMPOS_FORMULARIO.nota, nota.toFixed(2));
+
+    await fetch(URL_FORMULARIO, {
+      method: "POST",
+      mode: "no-cors",
+      body: dados,
+    });
+  } catch (e) {}
+}
+
+// ================= UTIL: DIGITAR =================
+
+function pausar(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+let PULAR_TELA = false;
+let removerSkip = null;
+
+function armarSkip() {
+  if (removerSkip) removerSkip();
+  const aoInteragir = () => { PULAR_TELA = true; };
+  const timer = setTimeout(() => {
+    document.addEventListener("click", aoInteragir);
+    document.addEventListener("keydown", aoInteragir);
+  }, 150);
+  removerSkip = () => {
+    clearTimeout(timer);
+    document.removeEventListener("click", aoInteragir);
+    document.removeEventListener("keydown", aoInteragir);
+  };
+}
+
+async function digitar(container, texto, classe) {
+  const span = document.createElement("span");
+  if (classe) span.className = classe;
+  container.appendChild(span);
+
+  if (PULAR_TELA || CONFIG.velocidade === 0) { span.textContent = texto; return span; }
+
+  let contador = 0;
+  for (const letra of texto) {
+    if (PULAR_TELA) { span.textContent = texto; break; }
+    span.textContent += letra;
+    contador++;
+    if (contador % 2 === 0) somTecla();
+    await pausar(CONFIG.velocidade);
+  }
+  return span;
+}
+
+async function digitarParagrafo(container, texto, classe) {
+  const p = document.createElement("p");
+  container.appendChild(p);
+  await digitar(p, texto, classe);
+}
+
+function linhaOrnamento(caractere) {
+  const div = document.createElement("div");
+  div.className = "linha-topo";
+  div.textContent = caractere.repeat(LARGURA);
+  return div;
+}
+
+function cabecalho(titulo) {
+  PULAR_TELA = false;
+  armarSkip();
+  const tela = document.getElementById("tela");
+  tela.innerHTML = "";
+  tela.appendChild(linhaOrnamento("="));
+  const h1 = document.createElement("h1");
+  h1.className = "cabecalho";
+  h1.textContent = titulo;
+  tela.appendChild(h1);
+  tela.appendChild(linhaOrnamento("="));
+  const corpo = document.createElement("div");
+  corpo.className = "corpo";
+  tela.appendChild(corpo);
+  return corpo;
+}
+
+function criarBotao(html, aoClicar, selecionada, opcoes) {
+  const config = opcoes || {};
+  const botao = document.createElement("button");
+  botao.className = "opcao" + (selecionada ? " selecionada" : "");
+  botao.innerHTML = html;
+  botao.onclick = (ev) => {
+    ev.stopPropagation();
+    if (config.podeClicar && !config.podeClicar()) return;
+    if (!config.semSom) somConfirmar();
+    aoClicar();
+  };
+  return botao;
+}
+
+// ================= FETCH DE ARQUIVOS =================
+
+async function buscarTexto(caminho) {
+  const resposta = await fetch(caminho, { cache: "no-store" });
+  if (!resposta.ok) throw new Error("Não encontrei: " + caminho);
+  return await resposta.text();
+}
+
+async function buscarLista(caminho) {
+  const texto = await buscarTexto(caminho);
+  return texto.split(/\r\n|\r|\n/).map(l => l.trim()).filter(l => l !== "");
+}
+
+// ================= PARSER DE QUESTÕES =================
+
+function carregarQuestoes(texto) {
+  const linhas = texto.split(/\r\n|\r|\n/).map(l => l.trim());
+  const questoes = [];
+  let questao = { textos: [], item: "", alternativas: [], resposta: "" };
+  let marcador = "";
+  const padraoAlternativa = /^([A-Ea-e1-5])\s*[)\.:\-]\s*(.*)$/;
+
+  for (const linha of linhas) {
+    if (linha === "===") {
+      if (questao.item !== "") questoes.push(questao);
+      questao = { textos: [], item: "", alternativas: [], resposta: "" };
+      marcador = "";
+    } else if (linha === "TEXTO:") {
+      marcador = "texto";
+      questao.textos.push("");
+    } else if (linha === "ITEM:") {
+      marcador = "item";
+      questao.item = "";
+    } else if (padraoAlternativa.test(linha)) {
+      marcador = "alternativa";
+      const m = linha.match(padraoAlternativa);
+      questao.alternativas.push({ rotulo: m[1], texto: m[2].trim() });
+    } else if (linha === "RESPOSTA:") {
+      marcador = "resposta";
+    } else if (linha === "") {
+      if (marcador === "texto" && questao.textos[questao.textos.length - 1] !== "") {
+        questao.textos[questao.textos.length - 1] += "\n";
+      } else if (marcador === "item" && questao.item !== "") {
+        questao.item += "\n";
+      }
+    } else {
+      if (marcador === "texto") {
+        const i = questao.textos.length - 1;
+        questao.textos[i] = questao.textos[i] === "" ? linha : questao.textos[i] + "\n" + linha;
+      } else if (marcador === "item") {
+        questao.item = questao.item === "" ? linha : questao.item + "\n" + linha;
+      } else if (marcador === "alternativa") {
+        const i = questao.alternativas.length - 1;
+        questao.alternativas[i].texto = questao.alternativas[i].texto === "" ? linha : questao.alternativas[i].texto + "\n" + linha;
+      } else if (marcador === "resposta") {
+        questao.resposta = questao.resposta === "" ? linha : questao.resposta + "\n" + linha;
+      }
+    }
+  }
+  if (questao.item !== "") questoes.push(questao);
+  return questoes;
+}
+
+const MAPA_POSICAO_LETRA = { "1": "A", "2": "B", "3": "C", "4": "D", "5": "E" };
+
+function normalizarAlternativa(valor) {
+  if (!valor) return null;
+  valor = valor.trim().toUpperCase().replace(/[.):\s\-]/g, "");
+  if (valor === "") return null;
+  const mapa = { A: "1", B: "2", C: "3", D: "4", E: "5" };
+  if (mapa[valor]) return mapa[valor];
+  if (/^\d+$/.test(valor)) return valor;
+  return null;
+}
+
+function embaralhar(lista) {
+  const copia = lista.slice();
+  for (let i = copia.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copia[i], copia[j]] = [copia[j], copia[i]];
+  }
+  return copia;
+}
+
+// ================= LOGIN (TURMAS/ALUNOS) =================
+
+let turmasCache = null;
+
+async function carregarTurmasCache() {
+  if (turmasCache) return turmasCache;
+  turmasCache = [];
+  try {
+    const linhas = await buscarLista("turmas/turmas.txt");
+    for (const linha of linhas) {
+      const partes = linha.split(" - ").map(p => p.trim());
+      if (partes.length >= 2 && partes[1].toLowerCase().endsWith(".txt")) {
+        turmasCache.push({ titulo: partes[0], arquivo: partes[1], senha: partes.length >= 3 ? partes[2] : null });
+      } else if (partes.length === 2) {
+        turmasCache.push({ titulo: partes[0], arquivo: null, senha: partes[1] });
+      } else {
+        turmasCache.push({ titulo: partes[0], arquivo: null, senha: null });
+      }
+    }
+  } catch (e) { turmasCache = []; }
+  return turmasCache;
+}
+
+async function carregarRoster(arquivo) {
+  let alunos = [];
+  try {
+    const linhas = await buscarLista("turmas/" + arquivo);
+    for (const linha of linhas) {
+      if (linha.includes(" - ")) {
+        const [nome, senha] = linha.split(" - ").map(s => s.trim());
+        alunos.push({ nome, senha });
+      } else {
+        alunos.push({ nome: linha, senha: null });
+      }
+    }
+  } catch (e) { alunos = []; }
+  return alunos;
+}
+
+async function telaSenha(senhaEsperada, aoAcertar, aoCancelar) {
+  const corpo = cabecalho("Senha");
+  await digitarParagrafo(corpo, "Digite sua senha:");
+
+  const campo = document.createElement("input");
+  campo.type = "text";
+  campo.inputMode = "numeric";
+  campo.autocomplete = "off";
+  corpo.appendChild(campo);
+  setTimeout(() => campo.focus(), 50);
+
+  const mensagemErro = document.createElement("p");
+  mensagemErro.className = "erro-texto";
+  corpo.appendChild(mensagemErro);
+
+  const confirmar = () => {
+    if (campo.value.trim() === senhaEsperada) {
+      somConfirmar();
+      aoAcertar();
+    } else {
+      somErro();
+      mensagemErro.textContent = "Senha incorreta. Tente novamente.";
+      campo.value = "";
+      campo.focus();
+    }
+  };
+
+  campo.onkeydown = (ev) => { if (ev.key === "Enter") confirmar(); };
+  corpo.appendChild(criarBotao("Confirmar", confirmar, false, { semSom: true }));
+  corpo.appendChild(criarBotao("Voltar", aoCancelar));
+}
+
+async function telaLogin() {
+  const corpo = cabecalho("Login");
+  const turmas = await carregarTurmasCache();
+
+  if (turmas.length === 0) {
+    await digitarParagrafo(corpo, "Nenhuma turma cadastrada ainda.", "erro-texto");
+    corpo.appendChild(criarBotao("Continuar sem login", () => {
+      ALUNO_ATUAL = null; ALUNO_TURMA = null; ALUNO_REGISTRA = false;
+      telaMenu();
+    }));
+    return;
+  }
+
+  for (const turma of turmas) {
+    corpo.appendChild(criarBotao('<span class="rotulo">›</span>' + turma.titulo, () => selecionarTurma(turma)));
+  }
+}
+
+function selecionarTurma(turma) {
+  if (turma.senha) {
+    telaSenha(turma.senha, () => prosseguirTurma(turma), telaLogin);
+  } else {
+    prosseguirTurma(turma);
+  }
+}
+
+async function prosseguirTurma(turma) {
+  if (turma.arquivo === null) {
+    ALUNO_ATUAL = turma.titulo;
+    ALUNO_TURMA = null;
+    ALUNO_REGISTRA = false;
+    telaMenu();
+    return;
+  }
+  const roster = await carregarRoster(turma.arquivo);
+  telaAlunos(turma, roster);
+}
+
+async function telaAlunos(turma, roster) {
+  const corpo = cabecalho(turma.titulo);
+
+  if (roster.length === 0) {
+    await digitarParagrafo(corpo, "Essa turma não tem alunos cadastrados.", "erro-texto");
+    corpo.appendChild(criarBotao("Voltar", telaLogin));
+    return;
+  }
+
+  for (const aluno of roster) {
+    corpo.appendChild(criarBotao('<span class="rotulo">›</span>' + aluno.nome, () => selecionarAluno(turma, aluno, roster)));
+  }
+  corpo.appendChild(criarBotao("Voltar", telaLogin));
+}
+
+function selecionarAluno(turma, aluno, roster) {
+  if (aluno.senha) {
+    telaSenha(aluno.senha, () => confirmarLogin(turma, aluno), () => telaAlunos(turma, roster));
+  } else {
+    confirmarLogin(turma, aluno);
+  }
+}
+
+function confirmarLogin(turma, aluno) {
+  ALUNO_ATUAL = aluno.nome;
+  ALUNO_TURMA = turma.titulo;
+  ALUNO_REGISTRA = true;
+  telaMenu();
+}
+
+// ================= TELAS =================
+
+async function telaIntro() {
+  const corpo = cabecalho("Quiz Literário");
+  try {
+    const texto = await buscarTexto("telas/intro.txt");
+    for (const linha of texto.split(/\r\n|\r|\n/)) {
+      if (linha.trim() !== "") await digitarParagrafo(corpo, linha);
+    }
+  } catch (e) {
+    await digitarParagrafo(corpo, "Pressione para começar.");
+  }
+  const dica = document.createElement("p");
+  dica.className = "rodape-dica";
+  dica.textContent = "toque na tela para continuar";
+  corpo.appendChild(dica);
+  await new Promise(resolver => {
+    document.addEventListener("click", () => {
+      iniciarAudio();
+      try { if (window.Tone) Tone.start(); } catch (e) {}
+      resolver();
+    }, { once: true });
+  });
+  telaLogin();
+}
+
+async function telaMenu() {
+  const corpo = cabecalho("Menu");
+  if (ALUNO_ATUAL) {
+    const quemEsta = document.createElement("p");
+    quemEsta.className = "rodape-dica";
+    quemEsta.textContent = "logado como: " + ALUNO_ATUAL;
+    corpo.appendChild(quemEsta);
+  }
+  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Jogar', telaCategorias));
+  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Configurações', telaConfiguracoes));
+  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Créditos', telaCreditos));
+  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Trocar de usuário', telaLogin));
+}
+
+async function telaConfiguracoes() {
+  const corpo = cabecalho("Configurações");
+
+  function titulo(texto) {
+    const p = document.createElement("p");
+    p.className = "destaque-texto";
+    p.textContent = texto;
+    corpo.appendChild(p);
+  }
+
+  titulo("Tema:");
+  for (const tema of TEMAS) {
+    corpo.appendChild(criarBotao(tema.nome, () => { aplicarTema(tema.chave); telaConfiguracoes(); }, CONFIG.tema === tema.chave));
+  }
+
+  titulo("Efeito de digitação:");
+  for (const v of VELOCIDADES) {
+    corpo.appendChild(criarBotao(v.nome, () => { CONFIG.velocidade = v.ms; CONFIG.velocidadeChave = v.chave; telaConfiguracoes(); }, CONFIG.velocidadeChave === v.chave));
+  }
+
+  titulo("Som:");
+  corpo.appendChild(criarBotao(CONFIG.som ? "Ligado" : "Desligado", () => { CONFIG.som = !CONFIG.som; telaConfiguracoes(); }));
+
+  titulo("Tipo de onda:");
+  for (const onda of ONDAS) {
+    corpo.appendChild(criarBotao(onda.nome, () => { CONFIG.onda = onda.chave; somPreviaOnda(); telaConfiguracoes(); }, CONFIG.onda === onda.chave, { semSom: true }));
+  }
+
+  titulo("Trilha sonora:");
+  const linhaTrilha = document.createElement("div");
+  linhaTrilha.className = "opcao";
+  linhaTrilha.style.display = "flex";
+  linhaTrilha.style.justifyContent = "space-between";
+  linhaTrilha.style.alignItems = "center";
+
+  const criarSeta = (simbolo, direcao) => {
+    const seta = document.createElement("button");
+    seta.textContent = simbolo;
+    seta.style.cssText = "background:none;border:none;color:var(--destaque);font-size:20px;";
+    seta.onclick = (ev) => { ev.stopPropagation(); somConfirmar(); mudarTrilha(direcao); telaConfiguracoes(); };
+    return seta;
+  };
+
+  const nomeTrilha = document.createElement("span");
+  nomeTrilha.textContent = listaTrilhas[indiceTrilha];
+
+  linhaTrilha.appendChild(criarSeta("‹", -1));
+  linhaTrilha.appendChild(nomeTrilha);
+  linhaTrilha.appendChild(criarSeta("›", 1));
+
+  let toqueInicialX = null;
+  linhaTrilha.addEventListener("touchstart", (ev) => { toqueInicialX = ev.touches[0].clientX; });
+  linhaTrilha.addEventListener("touchend", (ev) => {
+    if (toqueInicialX === null) return;
+    const diferenca = ev.changedTouches[0].clientX - toqueInicialX;
+    if (Math.abs(diferenca) > 40) {
+      somConfirmar();
+      mudarTrilha(diferenca < 0 ? 1 : -1);
+      telaConfiguracoes();
+    }
+    toqueInicialX = null;
+  });
+  corpo.appendChild(linhaTrilha);
+
+  corpo.appendChild(criarBotao("Voltar", telaMenu));
+}
+
+async function telaCreditos() {
+  const corpo = cabecalho("Créditos");
+  try {
+    const texto = await buscarTexto("telas/creditos.txt");
+    for (const linha of texto.split(/\r\n|\r|\n/)) {
+      if (linha.trim() !== "") await digitarParagrafo(corpo, linha);
+    }
+  } catch (e) {
+    await digitarParagrafo(corpo, "Sem créditos cadastrados.");
+  }
+  corpo.appendChild(criarBotao("Voltar", telaMenu));
+}
+
+async function telaCategorias() {
+  const corpo = cabecalho("Categorias");
+  let arquivos = [];
+  try {
+    arquivos = await buscarLista("perguntas/lista.txt");
+  } catch (e) {
+    await digitarParagrafo(corpo, "Não encontrei perguntas/lista.txt.", "erro-texto");
+    return;
+  }
+  for (const arquivo of arquivos) {
+    const nome = arquivo.replace(".txt", "");
+    corpo.appendChild(criarBotao('<span class="rotulo">›</span>' + nome, () => telaQuiz(arquivo)));
+  }
+  corpo.appendChild(criarBotao("Voltar", telaMenu));
+}
+
+async function telaQuiz(arquivo) {
+  const corpo = cabecalho("Quiz Literário");
+  let perguntas;
+  try {
+    const texto = await buscarTexto("perguntas/" + arquivo);
+    perguntas = carregarQuestoes(texto);
+  } catch (e) {
+    await digitarParagrafo(corpo, "Não consegui carregar esse quiz.", "erro-texto");
+    return;
+  }
+  if (perguntas.length === 0) {
+    await digitarParagrafo(corpo, "Nenhuma pergunta encontrada nesse arquivo.", "erro-texto");
+    return;
+  }
+
+  perguntas.forEach((q, i) => { q.indiceOriginal = i; });
+
+  const total = perguntas.length;
+  const valorQuestao = 10 / total;
+  const ordem = embaralhar(perguntas);
+  let nota = 0;
+  let acertos = 0;
+  const erros = [];
+  const gabaritoLista = new Array(total).fill("?");
+  const respostasLista = new Array(total).fill("-");
+
+  for (let indice = 0; indice < ordem.length; indice++) {
+    const questao = ordem[indice];
+    const corpoQ = cabecalho("Quiz Literário");
+
+    const status = document.createElement("p");
+    status.className = "destaque-texto";
+    status.textContent = `Questão ${indice + 1} de ${total} — Nota atual: ${nota.toFixed(1)}`;
+    corpoQ.appendChild(status);
+    corpoQ.appendChild(linhaOrnamento("-"));
+
+    for (const texto of questao.textos) {
+      if (texto.trim() !== "") await digitarParagrafo(corpoQ, texto);
+    }
+    await digitarParagrafo(corpoQ, questao.item, "destaque-texto");
+
+    let liberado = false;
+    let resolverResposta;
+    const promessaResposta = new Promise(r => { resolverResposta = r; });
+    const blocos = [];
+    for (const alternativa of questao.alternativas) {
+      const botao = criarBotao('<span class="rotulo"></span><span class="texto-alt"></span>', () => resolverResposta(alternativa.rotulo), false, { podeClicar: () => liberado });
+      botao.querySelector(".rotulo").textContent = alternativa.rotulo;
+      corpoQ.appendChild(botao);
+      blocos.push({ botao, alternativa });
+    }
+    for (const bloco of blocos) {
+      await digitar(bloco.botao.querySelector(".texto-alt"), bloco.alternativa.texto);
+    }
+    liberado = true;
+    const respostaEscolhida = await promessaResposta;
+
+    const respostaUsuario = normalizarAlternativa(respostaEscolhida);
+    const respostaCerta = normalizarAlternativa(questao.resposta);
+    const acertou = respostaUsuario !== null && respostaUsuario === respostaCerta;
+
+    gabaritoLista[questao.indiceOriginal] = MAPA_POSICAO_LETRA[respostaCerta] || "?";
+    respostasLista[questao.indiceOriginal] = MAPA_POSICAO_LETRA[respostaUsuario] || "-";
+
+    const feedback = document.createElement("p");
+    if (acertou) {
+      nota += valorQuestao;
+      acertos += 1;
+      feedback.textContent = "Correto!";
+      feedback.className = "destaque-texto";
+      somAcerto();
+    } else {
+      feedback.textContent = "Errado!";
+      feedback.className = "erro-texto";
+      somErro();
+      const indiceCerta = respostaCerta ? parseInt(respostaCerta, 10) - 1 : -1;
+      const alternativaCerta = questao.alternativas[indiceCerta];
+      erros.push({
+        item: questao.item,
+        rotulo: alternativaCerta ? alternativaCerta.rotulo : "?",
+        texto: alternativaCerta ? alternativaCerta.texto : "",
+      });
+    }
+    corpoQ.appendChild(feedback);
+
+    await new Promise(resolver => {
+      corpoQ.appendChild(criarBotao("Continuar", resolver));
+    });
+  }
+
+  enviarResultado(arquivo.replace(".txt", ""), gabaritoLista, respostasLista, acertos, nota);
+
+  await telaResultado(nota, acertos, total, erros);
+}
+
+async function telaResultado(nota, acertos, total, erros) {
+  const corpo = cabecalho("Resultado");
+  await digitarParagrafo(corpo, `Nota final: ${nota.toFixed(2)}`, "destaque-texto");
+  await digitarParagrafo(corpo, `Acertos: ${acertos} de ${total}`);
+
+  if (erros.length > 0) {
+    corpo.appendChild(linhaOrnamento("-"));
+    await digitarParagrafo(corpo, "Revisão:", "destaque-texto");
+    for (const erro of erros) {
+      await digitarParagrafo(corpo, erro.item);
+      await digitarParagrafo(corpo, `Resposta certa: ${erro.rotulo} - ${erro.texto}`);
+    }
+  }
+
+  corpo.appendChild(criarBotao("Voltar ao início", telaMenu));
+}
+
+aplicarTema(CONFIG.tema);
+carregarTrilhas();
+telaIntro();
+</script>
+</body>
+</html>
