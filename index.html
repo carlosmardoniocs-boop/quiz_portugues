@@ -152,6 +152,10 @@ function somPreviaOnda() { tocarTom(440, 0.14); tocarTom(554, 0.14, null, 0.14);
 
 // ================= TRILHA SONORA (MIDI) =================
 
+let ALUNO_ATUAL = null;
+let ALUNO_TURMA = null;
+let ALUNO_REGISTRA = false;
+
 let listaTrilhas = ["Sem música"];
 let indiceTrilha = 0;
 
@@ -351,6 +355,145 @@ function embaralhar(lista) {
   return copia;
 }
 
+// ================= LOGIN (TURMAS/ALUNOS) =================
+
+let turmasCache = null;
+
+async function carregarTurmasCache() {
+  if (turmasCache) return turmasCache;
+  turmasCache = [];
+  try {
+    const linhas = await buscarLista("turmas/turmas.txt");
+    for (const linha of linhas) {
+      const partes = linha.split(" - ").map(p => p.trim());
+      if (partes.length >= 2 && partes[1].toLowerCase().endsWith(".txt")) {
+        turmasCache.push({ titulo: partes[0], arquivo: partes[1], senha: partes.length >= 3 ? partes[2] : null });
+      } else if (partes.length === 2) {
+        turmasCache.push({ titulo: partes[0], arquivo: null, senha: partes[1] });
+      } else {
+        turmasCache.push({ titulo: partes[0], arquivo: null, senha: null });
+      }
+    }
+  } catch (e) { turmasCache = []; }
+  return turmasCache;
+}
+
+async function carregarRoster(arquivo) {
+  let alunos = [];
+  try {
+    const linhas = await buscarLista("turmas/" + arquivo);
+    for (const linha of linhas) {
+      if (linha.includes(" - ")) {
+        const [nome, senha] = linha.split(" - ").map(s => s.trim());
+        alunos.push({ nome, senha });
+      } else {
+        alunos.push({ nome: linha, senha: null });
+      }
+    }
+  } catch (e) { alunos = []; }
+  return alunos;
+}
+
+async function telaSenha(senhaEsperada, aoAcertar, aoCancelar) {
+  const corpo = cabecalho("Senha");
+  await digitarParagrafo(corpo, "Digite sua senha:");
+
+  const campo = document.createElement("input");
+  campo.type = "text";
+  campo.inputMode = "numeric";
+  campo.autocomplete = "off";
+  corpo.appendChild(campo);
+  setTimeout(() => campo.focus(), 50);
+
+  const mensagemErro = document.createElement("p");
+  mensagemErro.className = "erro-texto";
+  corpo.appendChild(mensagemErro);
+
+  const confirmar = () => {
+    if (campo.value.trim() === senhaEsperada) {
+      somConfirmar();
+      aoAcertar();
+    } else {
+      somErro();
+      mensagemErro.textContent = "Senha incorreta. Tente novamente.";
+      campo.value = "";
+      campo.focus();
+    }
+  };
+
+  campo.onkeydown = (ev) => { if (ev.key === "Enter") confirmar(); };
+  corpo.appendChild(criarBotao("Confirmar", confirmar, false, { semSom: true }));
+  corpo.appendChild(criarBotao("Voltar", aoCancelar));
+}
+
+async function telaLogin() {
+  const corpo = cabecalho("Login");
+  const turmas = await carregarTurmasCache();
+
+  if (turmas.length === 0) {
+    await digitarParagrafo(corpo, "Nenhuma turma cadastrada ainda.", "erro-texto");
+    corpo.appendChild(criarBotao("Continuar sem login", () => {
+      ALUNO_ATUAL = null; ALUNO_TURMA = null; ALUNO_REGISTRA = false;
+      telaMenu();
+    }));
+    return;
+  }
+
+  for (const turma of turmas) {
+    corpo.appendChild(criarBotao('<span class="rotulo">›</span>' + turma.titulo, () => selecionarTurma(turma)));
+  }
+}
+
+function selecionarTurma(turma) {
+  if (turma.senha) {
+    telaSenha(turma.senha, () => prosseguirTurma(turma), telaLogin);
+  } else {
+    prosseguirTurma(turma);
+  }
+}
+
+async function prosseguirTurma(turma) {
+  if (turma.arquivo === null) {
+    ALUNO_ATUAL = turma.titulo;
+    ALUNO_TURMA = null;
+    ALUNO_REGISTRA = false;
+    telaMenu();
+    return;
+  }
+  const roster = await carregarRoster(turma.arquivo);
+  telaAlunos(turma, roster);
+}
+
+async function telaAlunos(turma, roster) {
+  const corpo = cabecalho(turma.titulo);
+
+  if (roster.length === 0) {
+    await digitarParagrafo(corpo, "Essa turma não tem alunos cadastrados.", "erro-texto");
+    corpo.appendChild(criarBotao("Voltar", telaLogin));
+    return;
+  }
+
+  for (const aluno of roster) {
+    corpo.appendChild(criarBotao('<span class="rotulo">›</span>' + aluno.nome, () => selecionarAluno(turma, aluno, roster)));
+  }
+  corpo.appendChild(criarBotao("Voltar", telaLogin));
+}
+
+function selecionarAluno(turma, aluno, roster) {
+  if (aluno.senha) {
+    telaSenha(aluno.senha, () => confirmarLogin(turma, aluno), () => telaAlunos(turma, roster));
+  } else {
+    confirmarLogin(turma, aluno);
+  }
+}
+
+function confirmarLogin(turma, aluno) {
+  ALUNO_ATUAL = aluno.nome;
+  ALUNO_TURMA = turma.titulo;
+  ALUNO_REGISTRA = true;
+  telaMenu();
+}
+
 // ================= TELAS =================
 
 async function telaIntro() {
@@ -374,14 +517,21 @@ async function telaIntro() {
       resolver();
     }, { once: true });
   });
-  telaMenu();
+  telaLogin();
 }
 
 async function telaMenu() {
   const corpo = cabecalho("Menu");
+  if (ALUNO_ATUAL) {
+    const quemEsta = document.createElement("p");
+    quemEsta.className = "rodape-dica";
+    quemEsta.textContent = "logado como: " + ALUNO_ATUAL;
+    corpo.appendChild(quemEsta);
+  }
   corpo.appendChild(criarBotao('<span class="rotulo">›</span>Jogar', telaCategorias));
   corpo.appendChild(criarBotao('<span class="rotulo">›</span>Configurações', telaConfiguracoes));
   corpo.appendChild(criarBotao('<span class="rotulo">›</span>Créditos', telaCreditos));
+  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Trocar de usuário', telaLogin));
 }
 
 async function telaConfiguracoes() {
