@@ -84,6 +84,31 @@
 <div id="tela"></div>
 <midi-player id="trilha" loop style="display:none"></midi-player>
 
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+  import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "COLE_AQUI",
+    authDomain: "COLE_AQUI",
+    projectId: "COLE_AQUI",
+    storageBucket: "COLE_AQUI",
+    messagingSenderId: "COLE_AQUI",
+    appId: "COLE_AQUI"
+  };
+
+  try {
+    const appFirebase = initializeApp(firebaseConfig);
+    window.firestoreDB = getFirestore(appFirebase);
+    window.firestoreDoc = doc;
+    window.firestoreGetDoc = getDoc;
+    window.firestoreSetDoc = setDoc;
+    window.firebasePronto = true;
+  } catch (e) {
+    window.firebasePronto = false;
+  }
+</script>
+
 <script>
 const LARGURA = 38;
 
@@ -193,36 +218,37 @@ if (elementoTrilha) {
   });
 }
 
-// ================= ENVIO DE RESULTADO (Google Formulários) =================
+// ================= RESULTADO (Firebase Firestore - tempo real) =================
 
-const URL_FORMULARIO = "https://docs.google.com/forms/d/e/1FAIpQLScLDrLLX54jVbRQXbgF574nMWDrJYtPfavSNAO9q99QX2h2iQ/formResponse";
+function idDocumentoResultado(quiz, aluno) {
+  return quiz + "__" + String(aluno).replace(/[^a-zA-Z0-9À-ÿ]/g, "_");
+}
 
-const CAMPOS_FORMULARIO = {
-  aluno: "entry.1340836397",
-  turma: "entry.600643261",
-  quiz: "entry.2027672235",
-  respostas: "entry.200796650",
-  gabarito: "entry.676044839",
-  acertos: "entry.1711264550",
-  nota: "entry.2068175582",
-};
+async function jaRespondeuQuiz(quiz, aluno) {
+  if (!window.firebasePronto) return false;
+  try {
+    const ref = window.firestoreDoc(window.firestoreDB, "resultados", idDocumentoResultado(quiz, aluno));
+    const snap = await window.firestoreGetDoc(ref);
+    return snap.exists();
+  } catch (e) {
+    return false;
+  }
+}
 
 async function enviarResultado(quiz, gabarito, respostas, acertos, nota) {
   if (!ALUNO_REGISTRA) return;
+  if (!window.firebasePronto) return;
   try {
-    const dados = new URLSearchParams();
-    dados.append(CAMPOS_FORMULARIO.aluno, ALUNO_ATUAL || "");
-    dados.append(CAMPOS_FORMULARIO.turma, ALUNO_TURMA || "");
-    dados.append(CAMPOS_FORMULARIO.quiz, quiz);
-    dados.append(CAMPOS_FORMULARIO.respostas, respostas.join(","));
-    dados.append(CAMPOS_FORMULARIO.gabarito, gabarito.join(","));
-    dados.append(CAMPOS_FORMULARIO.acertos, String(acertos));
-    dados.append(CAMPOS_FORMULARIO.nota, nota.toFixed(2));
-
-    await fetch(URL_FORMULARIO, {
-      method: "POST",
-      mode: "no-cors",
-      body: dados,
+    const ref = window.firestoreDoc(window.firestoreDB, "resultados", idDocumentoResultado(quiz, ALUNO_ATUAL));
+    await window.firestoreSetDoc(ref, {
+      quiz: quiz,
+      turma: ALUNO_TURMA,
+      aluno: ALUNO_ATUAL,
+      gabarito: gabarito,
+      respostas: respostas,
+      acertos: acertos,
+      nota: nota,
+      data: new Date().toISOString(),
     });
   } catch (e) {}
 }
@@ -664,7 +690,19 @@ async function telaCategorias() {
   }
   for (const arquivo of arquivos) {
     const nome = arquivo.replace(".txt", "");
-    corpo.appendChild(criarBotao('<span class="rotulo">›</span>' + nome, () => telaQuiz(arquivo)));
+    corpo.appendChild(criarBotao('<span class="rotulo">›</span>' + nome, async () => {
+      if (ALUNO_REGISTRA) {
+        const feito = await jaRespondeuQuiz(nome, ALUNO_ATUAL);
+        if (feito) {
+          const avisoCorpo = cabecalho("Categorias");
+          await digitarParagrafo(avisoCorpo, "Você já concluiu este quiz.", "erro-texto");
+          await digitarParagrafo(avisoCorpo, "Fale com seu professor se precisar refazer.");
+          avisoCorpo.appendChild(criarBotao("Voltar", telaCategorias));
+          return;
+        }
+      }
+      telaQuiz(arquivo);
+    }));
   }
   corpo.appendChild(criarBotao("Voltar", telaMenu));
 }
