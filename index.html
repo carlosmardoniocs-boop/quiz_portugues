@@ -86,7 +86,7 @@
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+  import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
   const firebaseConfig = {
   apiKey: "AIzaSyAMZ1JGuFFkaFSI1denzSKY_aPjgH_3rws",
@@ -104,6 +104,7 @@
     window.firestoreDoc = doc;
     window.firestoreGetDoc = getDoc;
     window.firestoreSetDoc = setDoc;
+    window.firestoreOnSnapshot = onSnapshot;
     window.firebasePronto = true;
   } catch (e) {
     window.firebasePronto = false;
@@ -553,10 +554,103 @@ function selecionarAluno(turma, aluno, roster) {
   }
 }
 
-function confirmarLogin(turma, aluno) {
+// ================= SESSÃO (controle de sala em tempo real) =================
+
+let intervaloHeartbeat = null;
+let pararEscutaBloqueio = null;
+
+function idSessao(aluno) {
+  return String(aluno).replace(/[^a-zA-Z0-9À-ÿ]/g, "_");
+}
+
+async function verificarSessaoAtiva(aluno) {
+  if (!window.firebasePronto) return null;
+  try {
+    const ref = window.firestoreDoc(window.firestoreDB, "sessoes", idSessao(aluno));
+    const snap = await window.firestoreGetDoc(ref);
+    if (!snap.exists()) return null;
+    const dados = snap.data();
+    const ultimoPing = dados.ultimoPing ? new Date(dados.ultimoPing).getTime() : 0;
+    const segundosParado = (Date.now() - ultimoPing) / 1000;
+    if (dados.ativo && segundosParado < 60) return dados;
+    return null;
+  } catch (e) {
+    console.error("Erro ao verificar sessão ativa:", e);
+    return null;
+  }
+}
+
+async function abrirSessao(aluno, turma) {
+  encerrarEscutaLocal();
+
+  if (!window.firebasePronto) return;
+
+  try {
+    const ref = window.firestoreDoc(window.firestoreDB, "sessoes", idSessao(aluno));
+    await window.firestoreSetDoc(ref, {
+      aluno: aluno,
+      turma: turma || "",
+      entrou: new Date().toISOString(),
+      ultimoPing: new Date().toISOString(),
+      ativo: true,
+      bloqueado: false,
+    });
+
+    intervaloHeartbeat = setInterval(() => {
+      window.firestoreSetDoc(ref, { ultimoPing: new Date().toISOString() }, { merge: true }).catch(() => {});
+    }, 20000);
+
+    pararEscutaBloqueio = window.firestoreOnSnapshot(ref, (snap) => {
+      const dados = snap.data();
+      if (dados && dados.bloqueado) encerrarPorBloqueio();
+    });
+  } catch (e) {
+    console.error("Erro ao abrir sessão:", e);
+  }
+}
+
+function encerrarEscutaLocal() {
+  if (intervaloHeartbeat) { clearInterval(intervaloHeartbeat); intervaloHeartbeat = null; }
+  if (pararEscutaBloqueio) { pararEscutaBloqueio(); pararEscutaBloqueio = null; }
+}
+
+async function sairDaSessao() {
+  const alunoAnterior = ALUNO_ATUAL;
+  encerrarEscutaLocal();
+  if (alunoAnterior && window.firebasePronto) {
+    try {
+      const ref = window.firestoreDoc(window.firestoreDB, "sessoes", idSessao(alunoAnterior));
+      await window.firestoreSetDoc(ref, { ativo: false }, { merge: true });
+    } catch (e) {}
+  }
+  telaLogin();
+}
+
+async function encerrarPorBloqueio() {
+  encerrarEscutaLocal();
+  const corpo = cabecalho("Sessão encerrada");
+  await digitarParagrafo(corpo, "O professor encerrou sua sessão.", "erro-texto");
+  corpo.appendChild(criarBotao("Voltar ao login", telaLogin));
+}
+
+async function confirmarLogin(turma, aluno) {
+  const sessaoExistente = await verificarSessaoAtiva(aluno.nome);
+  if (sessaoExistente) {
+    const corpo = cabecalho("Login");
+    await digitarParagrafo(corpo, "Esse perfil já está em uso em outro aparelho agora.", "erro-texto");
+    await digitarParagrafo(corpo, "Avise o professor antes de continuar.");
+    corpo.appendChild(criarBotao("Tentar mesmo assim", () => prosseguirLoginConfirmado(turma, aluno)));
+    corpo.appendChild(criarBotao("Voltar", telaLogin));
+    return;
+  }
+  prosseguirLoginConfirmado(turma, aluno);
+}
+
+function prosseguirLoginConfirmado(turma, aluno) {
   ALUNO_ATUAL = aluno.nome;
   ALUNO_TURMA = turma.titulo;
   ALUNO_REGISTRA = true;
+  abrirSessao(aluno.nome, turma.titulo);
   telaMenu();
 }
 
@@ -597,7 +691,7 @@ async function telaMenu() {
   corpo.appendChild(criarBotao('<span class="rotulo">›</span>Jogar', telaCategorias));
   corpo.appendChild(criarBotao('<span class="rotulo">›</span>Configurações', telaConfiguracoes));
   corpo.appendChild(criarBotao('<span class="rotulo">›</span>Créditos', telaCreditos));
-  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Trocar de usuário', telaLogin));
+  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Trocar de usuário', sairDaSessao));
 }
 
 async function telaConfiguracoes() {
