@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Painel do Professor</title>
+<style>
+  :root { --fundo:#0b0f0d; --caixa:#0f1512; --linha:#1f3d2a; --texto:#8fd7a8; --destaque:#4dff88; --erro:#ff6b6b; --aviso:#ffb000; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--fundo); color:var(--texto); font-family:'Courier New', monospace; padding:20px 14px 60px; }
+  h1 { color:var(--destaque); font-size:18px; letter-spacing:1px; text-align:center; margin:0 0 6px; }
+  h2 { color:var(--destaque); font-size:15px; border-bottom:1px solid var(--linha); padding-bottom:6px; margin-top:34px; }
+  #login { max-width:320px; margin:80px auto; text-align:center; }
+  #login input { width:100%; background:var(--caixa); border:1px solid var(--linha); color:var(--destaque); font-family:inherit; font-size:16px; padding:10px; margin-bottom:10px; }
+  #login button, .acao { background:var(--caixa); border:1px solid var(--linha); color:var(--texto); font-family:inherit; padding:8px 10px; cursor:pointer; border-radius:2px; font-size:13px; }
+  .acao.bloquear { border-color:var(--erro); color:var(--erro); }
+  .acao.liberar { border-color:var(--aviso); color:var(--aviso); }
+  .acao.apagar { border-color:var(--erro); color:var(--erro); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--linha); white-space:nowrap; }
+  th { color:var(--linha); font-weight:normal; text-transform:uppercase; font-size:11px; }
+  .tabela-wrap { overflow-x:auto; }
+  .ativo { color:var(--destaque); }
+  .parado { color:var(--linha); }
+  .vazio { color:var(--linha); padding:14px 0; }
+  select { background:var(--caixa); border:1px solid var(--linha); color:var(--texto); font-family:inherit; padding:6px; margin-bottom:10px; }
+  #painel { display:none; }
+</style>
+</head>
+<body>
