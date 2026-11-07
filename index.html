@@ -86,7 +86,7 @@
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+  import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, deleteDoc, query, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
   const firebaseConfig = {
   apiKey: "AIzaSyAMZ1JGuFFkaFSI1denzSKY_aPjgH_3rws",
@@ -105,6 +105,11 @@
     window.firestoreGetDoc = getDoc;
     window.firestoreSetDoc = setDoc;
     window.firestoreOnSnapshot = onSnapshot;
+    window.firestoreCollection = collection;
+    window.firestoreGetDocs = getDocs;
+    window.firestoreDeleteDoc = deleteDoc;
+    window.firestoreQuery = query;
+    window.firestoreWhere = where;
     window.firebasePronto = true;
   } catch (e) {
     window.firebasePronto = false;
@@ -237,22 +242,19 @@ async function jaRespondeuQuiz(quiz, aluno) {
   }
 }
 
-async function enviarResultado(quiz, gabarito, respostas, acertos, nota) {
-  if (!ALUNO_REGISTRA) return;
-  if (!window.firebasePronto) return;
+async function enviarResultado(quiz, gabarito, respostas, acertos, nota, cfg, atingiuMeta) {
+  if (!ALUNO_REGISTRA) return null;
+  if (!window.firebasePronto) { console.error("Firebase não está pronto."); return false; }
   try {
     const ref = window.firestoreDoc(window.firestoreDB, "resultados", idDocumentoResultado(quiz, ALUNO_ATUAL));
     await window.firestoreSetDoc(ref, {
-      quiz: quiz,
-      turma: ALUNO_TURMA,
-      aluno: ALUNO_ATUAL,
-      gabarito: gabarito,
-      respostas: respostas,
-      acertos: acertos,
-      nota: nota,
+      quiz: quiz, turma: ALUNO_TURMA, aluno: ALUNO_ATUAL,
+      gabarito: gabarito, respostas: respostas,
+      acertos: acertos, nota: nota, config: cfg, atingiuMeta: !!atingiuMeta,
       data: new Date().toISOString(),
     });
-  } catch (e) {}
+    return true;
+  } catch (e) { console.error("Erro ao enviar resultado:", e); return false; }
 }
 
 // ================= UTIL: DIGITAR =================
@@ -493,6 +495,20 @@ async function telaSenha(senhaEsperada, aoAcertar, aoCancelar) {
   corpo.appendChild(criarBotao("Voltar", aoCancelar));
 }
 
+
+function abrirProfessor() {
+  if (window.telaProfessor) { window.telaProfessor(); return; }
+  const s = document.createElement("script");
+  s.src = "professor.js?v=" + Date.now();
+  s.onload = () => window.telaProfessor();
+  s.onerror = async () => {
+    const corpo = cabecalho("Professor");
+    await digitarParagrafo(corpo, "Não consegui carregar o painel (professor.js).", "erro-texto");
+    corpo.appendChild(criarBotao("Voltar", telaLogin));
+  };
+  document.body.appendChild(s);
+}
+
 async function telaLogin() {
   const corpo = cabecalho("Login");
   const turmas = await carregarTurmasCache();
@@ -519,7 +535,22 @@ function selecionarTurma(turma) {
   }
 }
 
+function ehProfessor(turma) {
+  return turma.arquivo === null && turma.titulo.trim().toLowerCase() === "professor";
+}
+
 async function prosseguirTurma(turma) {
+  if (ehProfessor(turma)) {
+    if (!turma.senha) {
+      const corpo = cabecalho("Professor");
+      await digitarParagrafo(corpo, "Defina uma senha em turmas.txt, assim: Professor - 123456", "erro-texto");
+      corpo.appendChild(criarBotao("Voltar", telaLogin));
+      return;
+    }
+    ALUNO_ATUAL = null; ALUNO_TURMA = null; ALUNO_REGISTRA = false;
+    abrirProfessor();
+    return;
+  }
   if (turma.arquivo === null) {
     ALUNO_ATUAL = turma.titulo;
     ALUNO_TURMA = null;
@@ -802,12 +833,32 @@ async function telaCategorias() {
   corpo.appendChild(criarBotao("Voltar", telaMenu));
 }
 
+const CONFIG_PADRAO = { ordem: "aleatoria", pontuacao: "dez", tempo: 0, modo: "normal", ganho: 1, perda: 1, meta: 10 };
+
+async function carregarConfigQuiz(nome) {
+  const cfg = Object.assign({}, CONFIG_PADRAO);
+  if (!window.firebasePronto) return cfg;
+  try {
+    const snap = await window.firestoreGetDoc(window.firestoreDoc(window.firestoreDB, "configuracoes", nome));
+    if (snap.exists()) Object.assign(cfg, snap.data());
+  } catch (e) { console.error("Erro ao ler configuração do quiz:", e); }
+  return cfg;
+}
+
+function fmt(n) { return String(Math.round(n * 100) / 100); }
+
+function pontuarQuestao(cfg, total, resultado) {
+  if (resultado === "acertou") return cfg.modo === "arriscar" ? cfg.ganho : (cfg.pontuacao === "dez" ? 10 / total : 1);
+  if (resultado === "errou" && cfg.modo === "arriscar") return -cfg.perda;
+  return 0;
+}
+
 async function telaQuiz(arquivo) {
+  const nomeQuiz = arquivo.replace(".txt", "");
   const corpo = cabecalho("Quiz Literário");
   let perguntas;
   try {
-    const texto = await buscarTexto("perguntas/" + arquivo);
-    perguntas = carregarQuestoes(texto);
+    perguntas = carregarQuestoes(await buscarTexto("perguntas/" + arquivo));
   } catch (e) {
     await digitarParagrafo(corpo, "Não consegui carregar esse quiz.", "erro-texto");
     return;
@@ -817,16 +868,18 @@ async function telaQuiz(arquivo) {
     return;
   }
 
-  perguntas.forEach((q, i) => { q.indiceOriginal = i; });
+  const cfg = await carregarConfigQuiz(nomeQuiz);
+  const arriscar = cfg.modo === "arriscar";
 
+  perguntas.forEach((q, i) => { q.indiceOriginal = i; });
   const total = perguntas.length;
-  const valorQuestao = 10 / total;
-  const ordem = embaralhar(perguntas);
-  let nota = 0;
-  let acertos = 0;
-  const erros = [];
-  const gabaritoLista = new Array(total).fill("?");
+  const ordem = cfg.ordem === "sequencial" ? perguntas.slice() : embaralhar(perguntas);
+  const gabaritoLista = perguntas.map(q => MAPA_POSICAO_LETRA[normalizarAlternativa(q.resposta)] || "?");
   const respostasLista = new Array(total).fill("-");
+  let pontos = 0;
+  let acertos = 0;
+  let atingiuMeta = false;
+  const erros = [];
 
   for (let indice = 0; indice < ordem.length; indice++) {
     const questao = ordem[indice];
@@ -834,8 +887,18 @@ async function telaQuiz(arquivo) {
 
     const status = document.createElement("p");
     status.className = "destaque-texto";
-    status.textContent = `Questão ${indice + 1} de ${total} — Nota atual: ${nota.toFixed(1)}`;
+    status.textContent = arriscar
+      ? `Questão ${indice + 1} de ${total} — Pontos: ${fmt(pontos)} (meta ${cfg.meta})`
+      : `Questão ${indice + 1} de ${total} — ${cfg.pontuacao === "dez" ? "Nota" : "Pontos"} atual: ${fmt(pontos)}`;
     corpoQ.appendChild(status);
+
+    let linhaTempo = null;
+    if (cfg.tempo > 0) {
+      linhaTempo = document.createElement("p");
+      linhaTempo.className = "destaque-texto";
+      linhaTempo.textContent = `Tempo: ${cfg.tempo}s`;
+      corpoQ.appendChild(linhaTempo);
+    }
     corpoQ.appendChild(linhaOrnamento("-"));
 
     for (const texto of questao.textos) {
@@ -853,31 +916,47 @@ async function telaQuiz(arquivo) {
       corpoQ.appendChild(botao);
       blocos.push({ botao, alternativa });
     }
+    if (arriscar) {
+      corpoQ.appendChild(criarBotao("Pular (0 pontos)", () => resolverResposta("PULAR"), false, { podeClicar: () => liberado }));
+    }
     for (const bloco of blocos) {
       await digitar(bloco.botao.querySelector(".texto-alt"), bloco.alternativa.texto);
     }
     liberado = true;
+
+    let relogio = null;
+    if (linhaTempo) {
+      let restante = cfg.tempo;
+      relogio = setInterval(() => {
+        restante--;
+        linhaTempo.textContent = `Tempo: ${restante}s`;
+        if (restante <= 0) { clearInterval(relogio); resolverResposta("TEMPO"); }
+      }, 1000);
+    }
     const respostaEscolhida = await promessaResposta;
+    if (relogio) clearInterval(relogio);
 
-    const respostaUsuario = normalizarAlternativa(respostaEscolhida);
-    const respostaCerta = normalizarAlternativa(questao.resposta);
-    const acertou = respostaUsuario !== null && respostaUsuario === respostaCerta;
+    let resultado;
+    if (respostaEscolhida === "PULAR") { resultado = "pulou"; respostasLista[questao.indiceOriginal] = "P"; }
+    else if (respostaEscolhida === "TEMPO") { resultado = arriscar ? "pulou" : "tempo"; respostasLista[questao.indiceOriginal] = "T"; }
+    else {
+      const respostaUsuario = normalizarAlternativa(respostaEscolhida);
+      const respostaCerta = normalizarAlternativa(questao.resposta);
+      resultado = (respostaUsuario !== null && respostaUsuario === respostaCerta) ? "acertou" : "errou";
+      respostasLista[questao.indiceOriginal] = MAPA_POSICAO_LETRA[respostaUsuario] || "-";
+    }
 
-    gabaritoLista[questao.indiceOriginal] = MAPA_POSICAO_LETRA[respostaCerta] || "?";
-    respostasLista[questao.indiceOriginal] = MAPA_POSICAO_LETRA[respostaUsuario] || "-";
+    pontos += pontuarQuestao(cfg, total, resultado);
+    if (resultado === "acertou") acertos += 1;
 
     const feedback = document.createElement("p");
-    if (acertou) {
-      nota += valorQuestao;
-      acertos += 1;
-      feedback.textContent = "Correto!";
-      feedback.className = "destaque-texto";
-      somAcerto();
+    if (resultado === "acertou") {
+      feedback.textContent = "Correto!"; feedback.className = "destaque-texto"; somAcerto();
     } else {
-      feedback.textContent = "Errado!";
+      feedback.textContent = resultado === "errou" ? "Errado!" : (resultado === "tempo" ? "Tempo esgotado!" : "Você pulou.");
       feedback.className = "erro-texto";
-      somErro();
-      const indiceCerta = respostaCerta ? parseInt(respostaCerta, 10) - 1 : -1;
+      if (resultado !== "pulou") somErro();
+      const indiceCerta = parseInt(normalizarAlternativa(questao.resposta) || "0", 10) - 1;
       const alternativaCerta = questao.alternativas[indiceCerta];
       erros.push({
         item: questao.item,
@@ -887,20 +966,37 @@ async function telaQuiz(arquivo) {
     }
     corpoQ.appendChild(feedback);
 
-    await new Promise(resolver => {
-      corpoQ.appendChild(criarBotao("Continuar", resolver));
-    });
+    if (arriscar && pontos >= cfg.meta) {
+      atingiuMeta = true;
+      const meta = document.createElement("p");
+      meta.className = "destaque-texto";
+      meta.textContent = `Meta de ${cfg.meta} pontos atingida!`;
+      corpoQ.appendChild(meta);
+    }
+
+    await new Promise(resolver => { corpoQ.appendChild(criarBotao("Continuar", resolver)); });
+    if (atingiuMeta) break;
   }
 
-  enviarResultado(arquivo.replace(".txt", ""), gabaritoLista, respostasLista, acertos, nota);
-
-  await telaResultado(nota, acertos, total, erros);
+  pontos = Math.round(pontos * 100) / 100;
+  const envioOk = await enviarResultado(nomeQuiz, gabaritoLista, respostasLista, acertos, pontos, cfg, atingiuMeta);
+  await telaResultado(pontos, acertos, total, erros, envioOk, cfg, atingiuMeta);
 }
 
-async function telaResultado(nota, acertos, total, erros) {
+async function telaResultado(pontos, acertos, total, erros, envioOk, cfg, atingiuMeta) {
   const corpo = cabecalho("Resultado");
-  await digitarParagrafo(corpo, `Nota final: ${nota.toFixed(2)}`, "destaque-texto");
-  await digitarParagrafo(corpo, `Acertos: ${acertos} de ${total}`);
+  if (cfg.modo === "arriscar") {
+    await digitarParagrafo(corpo, `Pontos: ${fmt(pontos)} (meta ${cfg.meta})${atingiuMeta ? " - meta atingida!" : ""}`, "destaque-texto");
+    await digitarParagrafo(corpo, `Acertos: ${acertos}`);
+  } else if (cfg.pontuacao === "dez") {
+    await digitarParagrafo(corpo, `Nota final: ${pontos.toFixed(2)}`, "destaque-texto");
+    await digitarParagrafo(corpo, `Acertos: ${acertos} de ${total}`);
+  } else {
+    await digitarParagrafo(corpo, `Pontos: ${fmt(pontos)} de ${total}`, "destaque-texto");
+  }
+
+  if (envioOk === true) await digitarParagrafo(corpo, "Resultado salvo.", "destaque-texto");
+  else if (envioOk === false) await digitarParagrafo(corpo, "Não foi possível salvar o resultado (verifique a internet).", "erro-texto");
 
   if (erros.length > 0) {
     corpo.appendChild(linhaOrnamento("-"));
@@ -910,7 +1006,6 @@ async function telaResultado(nota, acertos, total, erros) {
       await digitarParagrafo(corpo, `Resposta certa: ${erro.rotulo} - ${erro.texto}`);
     }
   }
-
   corpo.appendChild(criarBotao("Voltar ao início", telaMenu));
 }
 
