@@ -594,6 +594,14 @@ function idSessao(aluno) {
   return String(aluno).replace(/[^a-zA-Z0-9À-ÿ]/g, "_");
 }
 
+function atualizarProgresso(campos) {
+  if (!ALUNO_REGISTRA || !ALUNO_ATUAL || !window.firebasePronto) return;
+  try {
+    const ref = window.firestoreDoc(window.firestoreDB, "sessoes", idSessao(ALUNO_ATUAL));
+    window.firestoreSetDoc(ref, { ...campos, ultimoPing: new Date().toISOString() }, { merge: true }).catch(() => {});
+  } catch (e) {}
+}
+
 async function verificarSessaoAtiva(aluno) {
   if (!window.firebasePronto) return null;
   try {
@@ -842,14 +850,15 @@ async function carregarConfigQuiz(nome) {
     const snap = await window.firestoreGetDoc(window.firestoreDoc(window.firestoreDB, "configuracoes", nome));
     if (snap.exists()) Object.assign(cfg, snap.data());
   } catch (e) { console.error("Erro ao ler configuração do quiz:", e); }
+  if (cfg.modo === "arriscar") cfg.modo = "desafio";
   return cfg;
 }
 
 function fmt(n) { return String(Math.round(n * 100) / 100); }
 
 function pontuarQuestao(cfg, total, resultado) {
-  if (resultado === "acertou") return cfg.modo === "arriscar" ? cfg.ganho : (cfg.pontuacao === "dez" ? 10 / total : 1);
-  if (resultado === "errou" && cfg.modo === "arriscar") return -cfg.perda;
+  if (resultado === "acertou") return cfg.modo === "desafio" ? cfg.ganho : (cfg.pontuacao === "dez" ? 10 / total : 1);
+  if (resultado === "errou" && cfg.modo === "desafio") return -cfg.perda;
   return 0;
 }
 
@@ -869,7 +878,7 @@ async function telaQuiz(arquivo) {
   }
 
   const cfg = await carregarConfigQuiz(nomeQuiz);
-  const arriscar = cfg.modo === "arriscar";
+  const desafio = cfg.modo === "desafio";
 
   perguntas.forEach((q, i) => { q.indiceOriginal = i; });
   const total = perguntas.length;
@@ -881,15 +890,19 @@ async function telaQuiz(arquivo) {
   let atingiuMeta = false;
   const erros = [];
 
-  for (let indice = 0; indice < ordem.length; indice++) {
-    const questao = ordem[indice];
+  const fila = ordem.slice();
+  atualizarProgresso({ quizAtual: nomeQuiz, acao: "lendo", pontos: 0, acertos: 0, total: total, modo: cfg.modo });
+
+  while (fila.length > 0) {
+    const questao = fila.shift();
     const corpoQ = cabecalho("Quiz Literário");
+    atualizarProgresso({ acao: "lendo" });
 
     const status = document.createElement("p");
     status.className = "destaque-texto";
-    status.textContent = arriscar
-      ? `Questão ${indice + 1} de ${total} — Pontos: ${fmt(pontos)} (meta ${cfg.meta})`
-      : `Questão ${indice + 1} de ${total} — ${cfg.pontuacao === "dez" ? "Nota" : "Pontos"} atual: ${fmt(pontos)}`;
+    status.textContent = desafio
+      ? `Pontos: ${fmt(pontos)} (meta ${cfg.meta}) — restam ${fila.length + 1} ${fila.length === 0 ? "questão" : "questões"}`
+      : `Questão ${total - fila.length} de ${total} — ${cfg.pontuacao === "dez" ? "Nota" : "Pontos"} atual: ${fmt(pontos)}`;
     corpoQ.appendChild(status);
 
     let linhaTempo = null;
@@ -916,8 +929,8 @@ async function telaQuiz(arquivo) {
       corpoQ.appendChild(botao);
       blocos.push({ botao, alternativa });
     }
-    if (arriscar) {
-      corpoQ.appendChild(criarBotao("Pular (0 pontos)", () => resolverResposta("PULAR"), false, { podeClicar: () => liberado }));
+    if (desafio) {
+      corpoQ.appendChild(criarBotao("Pular (a questão volta mais tarde)", () => resolverResposta("PULAR"), false, { podeClicar: () => liberado }));
     }
     for (const bloco of blocos) {
       await digitar(bloco.botao.querySelector(".texto-alt"), bloco.alternativa.texto);
@@ -938,7 +951,7 @@ async function telaQuiz(arquivo) {
 
     let resultado;
     if (respostaEscolhida === "PULAR") { resultado = "pulou"; respostasLista[questao.indiceOriginal] = "P"; }
-    else if (respostaEscolhida === "TEMPO") { resultado = arriscar ? "pulou" : "tempo"; respostasLista[questao.indiceOriginal] = "T"; }
+    else if (respostaEscolhida === "TEMPO") { resultado = desafio ? "pulou" : "tempo"; respostasLista[questao.indiceOriginal] = "T"; }
     else {
       const respostaUsuario = normalizarAlternativa(respostaEscolhida);
       const respostaCerta = normalizarAlternativa(questao.resposta);
@@ -946,16 +959,21 @@ async function telaQuiz(arquivo) {
       respostasLista[questao.indiceOriginal] = MAPA_POSICAO_LETRA[respostaUsuario] || "-";
     }
 
-    pontos += pontuarQuestao(cfg, total, resultado);
+    pontos = Math.round((pontos + pontuarQuestao(cfg, total, resultado)) * 100) / 100;
     if (resultado === "acertou") acertos += 1;
+    atualizarProgresso({ acao: resultado, pontos: pontos, acertos: acertos });
 
     const feedback = document.createElement("p");
     if (resultado === "acertou") {
       feedback.textContent = "Correto!"; feedback.className = "destaque-texto"; somAcerto();
-    } else {
-      feedback.textContent = resultado === "errou" ? "Errado!" : (resultado === "tempo" ? "Tempo esgotado!" : "Você pulou.");
+    } else if (resultado === "pulou") {
+      feedback.textContent = (respostaEscolhida === "TEMPO" ? "Tempo esgotado! " : "Você pulou. ") + "A questão volta mais tarde.";
       feedback.className = "erro-texto";
-      if (resultado !== "pulou") somErro();
+      fila.push(questao);
+    } else {
+      feedback.textContent = resultado === "errou" ? "Errado!" : "Tempo esgotado!";
+      feedback.className = "erro-texto";
+      somErro();
       const indiceCerta = parseInt(normalizarAlternativa(questao.resposta) || "0", 10) - 1;
       const alternativaCerta = questao.alternativas[indiceCerta];
       erros.push({
@@ -966,7 +984,7 @@ async function telaQuiz(arquivo) {
     }
     corpoQ.appendChild(feedback);
 
-    if (arriscar && pontos >= cfg.meta) {
+    if (desafio && pontos >= cfg.meta) {
       atingiuMeta = true;
       const meta = document.createElement("p");
       meta.className = "destaque-texto";
@@ -978,6 +996,7 @@ async function telaQuiz(arquivo) {
     if (atingiuMeta) break;
   }
 
+  atualizarProgresso({ acao: "terminou", pontos: Math.round(pontos * 100) / 100, acertos: acertos });
   pontos = Math.round(pontos * 100) / 100;
   const envioOk = await enviarResultado(nomeQuiz, gabaritoLista, respostasLista, acertos, pontos, cfg, atingiuMeta);
   await telaResultado(pontos, acertos, total, erros, envioOk, cfg, atingiuMeta);
@@ -985,9 +1004,10 @@ async function telaQuiz(arquivo) {
 
 async function telaResultado(pontos, acertos, total, erros, envioOk, cfg, atingiuMeta) {
   const corpo = cabecalho("Resultado");
-  if (cfg.modo === "arriscar") {
+  if (cfg.modo === "desafio") {
     await digitarParagrafo(corpo, `Pontos: ${fmt(pontos)} (meta ${cfg.meta})${atingiuMeta ? " - meta atingida!" : ""}`, "destaque-texto");
     await digitarParagrafo(corpo, `Acertos: ${acertos}`);
+    if (!atingiuMeta) await digitarParagrafo(corpo, "Você respondeu todas as questões sem atingir a meta.");
   } else if (cfg.pontuacao === "dez") {
     await digitarParagrafo(corpo, `Nota final: ${pontos.toFixed(2)}`, "destaque-texto");
     await digitarParagrafo(corpo, `Acertos: ${acertos} de ${total}`);
