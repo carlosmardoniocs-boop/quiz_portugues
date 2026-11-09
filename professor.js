@@ -3,6 +3,7 @@
 window.telaProfessor = function () {
   const corpo = cabecalho("Professor");
   corpo.appendChild(criarBotao('<span class="rotulo">›</span>Configurar quizzes', profListaQuizzes));
+  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Acompanhar turma', profEscolherTurma));
   corpo.appendChild(criarBotao("Sair do painel", telaLogin));
 };
 
@@ -21,9 +22,17 @@ async function profListaQuizzes() {
   corpo.appendChild(criarBotao("Voltar", window.telaProfessor));
 }
 
+const contagemQuestoes = {};
+
 async function profConfigQuiz(nome, cfgEmEdicao) {
   const corpo = cabecalho("Config: " + nome);
   const cfg = cfgEmEdicao || await carregarConfigQuiz(nome);
+
+  if (contagemQuestoes[nome] === undefined) {
+    try { contagemQuestoes[nome] = carregarQuestoes(await buscarTexto("perguntas/" + nome + ".txt")).length; }
+    catch (e) { contagemQuestoes[nome] = null; }
+  }
+  const n = contagemQuestoes[nome];
 
   const ciclo = (rotulo, campo, valores, formatar) => {
     corpo.appendChild(criarBotao(
@@ -37,15 +46,24 @@ async function profConfigQuiz(nome, cfgEmEdicao) {
   };
 
   ciclo("Ordem das questões", "ordem", ["aleatoria", "sequencial"], v => v === "aleatoria" ? "Aleatória" : "Sequencial");
-  ciclo("Modo", "modo", ["normal", "arriscar"], v => v === "normal" ? "Normal" : "Arriscar (pode pular)");
+  ciclo("Modo", "modo", ["normal", "desafio"], v => v === "normal" ? "Normal" : "Desafio (pode pular)");
   if (cfg.modo === "normal") {
     ciclo("Pontuação", "pontuacao", ["dez", "pontos"], v => v === "dez" ? "Nota de 0 a 10" : "1 ponto por questão");
   }
   ciclo("Tempo por questão", "tempo", [0, 15, 30, 45, 60, 90, 120], v => v ? v + "s" : "Livre");
-  if (cfg.modo === "arriscar") {
+  if (cfg.modo === "desafio") {
     ciclo("Pontos por acerto", "ganho", [0.5, 1, 2, 5], v => "+" + v);
     ciclo("Pontos por erro", "perda", [0, 0.5, 1, 2, 5], v => "-" + v);
-    ciclo("Meta para terminar", "meta", [5, 10, 15, 20, 30, 50], v => v + " pontos");
+    ciclo("Meta para terminar", "meta", [5, 10, 15, 20, 25, 30, 50], v => v + " pontos");
+    if (n) {
+      const precisa = Math.ceil(cfg.meta / cfg.ganho);
+      const info = document.createElement("p");
+      info.className = precisa > n ? "erro-texto" : "destaque-texto";
+      info.textContent = precisa > n
+        ? `ATENÇÃO: o quiz tem ${n} questões e a meta exige ${precisa} acertos. Não dá para atingir.`
+        : `O quiz tem ${n} questões; a meta exige ${precisa} acertos (${Math.round(precisa / n * 100)}% das questões).`;
+      corpo.appendChild(info);
+    }
   }
 
   const aviso = document.createElement("p");
@@ -63,4 +81,93 @@ async function profConfigQuiz(nome, cfgEmEdicao) {
     }
   }));
   corpo.appendChild(criarBotao("Voltar", profListaQuizzes));
+}
+
+
+// ===== ETAPA 2: ACOMPANHAR TURMA AO VIVO =====
+
+let profParar = null;
+
+function profEstadoAluno(s, agora) {
+  if (!s) return { quiz: "—", acao: "offline", pontos: "—", cor: "var(--linha)" };
+  const quiz = s.quizAtual || "—";
+  const pontos = s.pontos !== undefined ? fmt(s.pontos) : "—";
+  const parado = !s.ativo || !s.ultimoPing || (agora - new Date(s.ultimoPing).getTime()) > 60000;
+  if (parado) return { quiz, acao: "offline", pontos, cor: "var(--linha)" };
+  if (s.bloqueado) return { quiz, acao: "bloqueado", pontos, cor: "var(--erro)" };
+  if (!s.acao) return { quiz: "—", acao: "no menu", pontos: "—", cor: "var(--texto)" };
+  const cores = { lendo: "var(--texto)", acertou: "var(--destaque)", errou: "var(--erro)", pulou: "#ffb000", tempo: "#ffb000", terminou: "var(--destaque)" };
+  const nomes = { tempo: "tempo esgotado" };
+  return { quiz, acao: nomes[s.acao] || s.acao, pontos, cor: cores[s.acao] || "var(--texto)" };
+}
+
+function profInjetarEstilo() {
+  if (document.getElementById("estilo-prof")) return;
+  const s = document.createElement("style");
+  s.id = "estilo-prof";
+  s.textContent = ".tab-prof{width:100%;border-collapse:collapse;font-size:12px}.tab-prof th,.tab-prof td{text-align:left;padding:6px 4px;border-bottom:1px solid var(--linha)}.tab-prof th{color:var(--destaque);font-weight:normal}.tab-wrap{overflow-x:auto}";
+  document.head.appendChild(s);
+}
+
+async function profEscolherTurma() {
+  if (profParar) { profParar(); profParar = null; }
+  const corpo = cabecalho("Acompanhar turma");
+  const turmas = (await carregarTurmasCache()).filter(t => t.arquivo);
+  if (!turmas.length) await digitarParagrafo(corpo, "Nenhuma turma com lista de alunos em turmas.txt.", "erro-texto");
+  for (const t of turmas) corpo.appendChild(criarBotao('<span class="rotulo">›</span>' + t.titulo, () => profAcompanhar(t)));
+  corpo.appendChild(criarBotao("Voltar", window.telaProfessor));
+}
+
+async function profAcompanhar(turma) {
+  profInjetarEstilo();
+  const corpo = cabecalho(turma.titulo);
+  if (!window.firebasePronto) {
+    await digitarParagrafo(corpo, "Firebase não está pronto.", "erro-texto");
+    corpo.appendChild(criarBotao("Voltar", profEscolherTurma));
+    return;
+  }
+  const roster = await carregarRoster(turma.arquivo);
+  const resumo = document.createElement("p");
+  resumo.className = "destaque-texto";
+  corpo.appendChild(resumo);
+  const wrap = document.createElement("div");
+  wrap.className = "tab-wrap";
+  const tabela = document.createElement("table");
+  tabela.className = "tab-prof";
+  wrap.appendChild(tabela);
+  corpo.appendChild(wrap);
+
+  let cache = {};
+  const desenhar = () => {
+    const agora = Date.now();
+    tabela.innerHTML = "";
+    const cab = document.createElement("tr");
+    for (const t of ["Aluno", "Quiz", "Ação", "Nota"]) { const th = document.createElement("th"); th.textContent = t; cab.appendChild(th); }
+    tabela.appendChild(cab);
+    let online = 0, terminaram = 0;
+    for (const aluno of roster) {
+      const e = profEstadoAluno(cache[idSessao(aluno.nome)], agora);
+      if (e.acao !== "offline") online++;
+      if (e.acao === "terminou") terminaram++;
+      const tr = document.createElement("tr");
+      [aluno.nome, e.quiz, e.acao, e.pontos].forEach((txt, i) => {
+        const td = document.createElement("td");
+        td.textContent = txt;
+        if (i >= 2) td.style.color = e.cor;
+        tr.appendChild(td);
+      });
+      tabela.appendChild(tr);
+    }
+    resumo.textContent = "Online: " + online + " de " + roster.length + " | Terminaram: " + terminaram;
+  };
+  desenhar();
+
+  const fs = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js");
+  const cancelar = fs.onSnapshot(fs.collection(window.firestoreDB, "sessoes"),
+    (snap) => { cache = {}; snap.forEach(d => { cache[d.id] = d.data(); }); desenhar(); },
+    () => { resumo.textContent = "Erro ao ouvir o Firebase."; });
+  const relogio = setInterval(desenhar, 5000);
+  profParar = () => { cancelar(); clearInterval(relogio); };
+
+  corpo.appendChild(criarBotao("Voltar", () => { profParar(); profParar = null; profEscolherTurma(); }));
 }
