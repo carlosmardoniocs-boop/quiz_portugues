@@ -5,6 +5,10 @@ window.telaProfessor = function () {
   corpo.appendChild(criarBotao('<span class="rotulo">›</span>Configurar quizzes', profListaQuizzes));
   corpo.appendChild(criarBotao('<span class="rotulo">›</span>Acompanhar turma', profEscolherTurma));
   corpo.appendChild(criarBotao("Sair do painel", telaLogin));
+  const versao = document.createElement("p");
+  versao.className = "rodape-dica";
+  versao.textContent = "painel v3b (etapas 1 a 3)";
+  corpo.appendChild(versao);
 };
 
 async function profListaQuizzes() {
@@ -106,7 +110,7 @@ function profInjetarEstilo() {
   if (document.getElementById("estilo-prof")) return;
   const s = document.createElement("style");
   s.id = "estilo-prof";
-  s.textContent = ".tab-prof{width:100%;border-collapse:collapse;font-size:12px}.tab-prof th,.tab-prof td{text-align:left;padding:6px 4px;border-bottom:1px solid var(--linha)}.tab-prof th{color:var(--destaque);font-weight:normal}.tab-wrap{overflow-x:auto}.mini-prof{background:var(--fundo-caixa);border:1px solid var(--linha);color:var(--texto);font-family:inherit;font-size:12px;padding:3px 6px;margin-right:4px;cursor:pointer}";
+  s.textContent = ".tab-prof{width:100%;border-collapse:collapse;font-size:12px}.tab-prof th,.tab-prof td{text-align:left;padding:6px 4px;border-bottom:1px solid var(--linha)}.tab-prof th{color:var(--destaque);font-weight:normal}.tab-wrap{overflow-x:auto}.tab-prof tr.lin-aluno td{border-bottom:none;padding-bottom:2px}.acoes-prof{padding:2px 4px 10px!important}.mini-prof{background:var(--fundo-caixa);border:1px solid var(--linha);color:var(--texto);font-family:inherit;font-size:13px;padding:6px 12px;margin-right:6px;cursor:pointer}";
   document.head.appendChild(s);
 }
 
@@ -150,22 +154,29 @@ async function profAcompanhar(turma) {
   corpo.appendChild(wrap);
 
   const cab = document.createElement("tr");
-  for (const t of ["Aluno", "Quiz", "Ação", "Nota", ""]) { const th = document.createElement("th"); th.textContent = t; cab.appendChild(th); }
+  for (const t of ["Aluno", "Quiz", "Ação", "Nota"]) { const th = document.createElement("th"); th.textContent = t; cab.appendChild(th); }
   tabela.appendChild(cab);
 
   let cache = {};
   const linhas = roster.map(aluno => {
     const id = idSessao(aluno.nome);
     const tr = document.createElement("tr");
-    const cel = [0, 1, 2, 3, 4].map(() => { const td = document.createElement("td"); tr.appendChild(td); return td; });
+    tr.className = "lin-aluno";
+    const cel = [0, 1, 2, 3].map(() => { const td = document.createElement("td"); tr.appendChild(td); return td; });
     cel[0].textContent = aluno.nome;
     const btnBloq = profMiniBotao("Bloquear", () => {
       const s = cache[id];
       fs.setDoc(fs.doc(db, "sessoes", id), { bloqueado: !(s && s.bloqueado) }, { merge: true }).catch(() => {});
     });
-    cel[4].appendChild(btnBloq);
-    cel[4].appendChild(profMiniBotao("Resultados", () => profResultadosAluno(turma, aluno)));
+    const trAcoes = document.createElement("tr");
+    const tdAcoes = document.createElement("td");
+    tdAcoes.colSpan = 4;
+    tdAcoes.className = "acoes-prof";
+    tdAcoes.appendChild(btnBloq);
+    tdAcoes.appendChild(profMiniBotao("Resultados", () => profResultadosAluno(turma, aluno)));
+    trAcoes.appendChild(tdAcoes);
     tabela.appendChild(tr);
+    tabela.appendChild(trAcoes);
     return { id, cel, btnBloq };
   });
 
