@@ -23,3 +23,1029 @@
     background: var(--fundo);
     color: var(--texto);
     font-family: 'Courier New', 'IBM Plex Mono', monospace;
+    display: flex;
+    justify-content: center;
+    padding: 24px 14px;
+  }
+  #tela { width: 100%; max-width: 640px; }
+  .linha-topo {
+    color: var(--linha);
+    white-space: pre;
+    overflow-x: auto;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  h1.cabecalho {
+    text-align: center;
+    color: var(--destaque);
+    font-size: 15px;
+    letter-spacing: 2px;
+    margin: 2px 0;
+    text-transform: uppercase;
+  }
+  .corpo { padding: 14px 4px 30px; line-height: 1.6; font-size: 15px; }
+  .corpo p { margin: 0 0 14px; }
+  .destaque-texto { color: var(--destaque); }
+  .erro-texto { color: var(--erro); }
+  .opcao {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: var(--fundo-caixa);
+    border: 1px solid var(--linha);
+    color: var(--texto);
+    font-family: inherit;
+    font-size: 15px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    border-radius: 2px;
+  }
+  .opcao.selecionada { border-color: var(--destaque); color: var(--destaque); }
+  .opcao:active, .opcao:focus-visible { border-color: var(--destaque); color: var(--destaque); outline: none; }
+  .rotulo { color: var(--destaque); margin-right: 8px; }
+  input[type=text] {
+    width: 100%;
+    background: var(--fundo-caixa);
+    border: 1px solid var(--linha);
+    color: var(--destaque);
+    font-family: inherit;
+    font-size: 15px;
+    padding: 10px 12px;
+    margin: 10px 0;
+    border-radius: 2px;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--destaque); }
+  .rodape-dica { color: var(--linha); font-size: 12px; margin-top: 18px; }
+</style>
+<script defer src="https://cdn.jsdelivr.net/combine/npm/tone@14.7.58,npm/@magenta/music@1.23.1/es6/core.js,npm/html-midi-player@1.5.0"></script>
+</head>
+<body class="tema-fosforo">
+<div id="tela"></div>
+<midi-player id="trilha" loop style="display:none"></midi-player>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+  import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, deleteDoc, query, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+  apiKey: "AIzaSyAMZ1JGuFFkaFSI1denzSKY_aPjgH_3rws",
+  authDomain: "quiz-portugues-bcdf7.firebaseapp.com",
+  projectId: "quiz-portugues-bcdf7",
+  storageBucket: "quiz-portugues-bcdf7.firebasestorage.app",
+  messagingSenderId: "90951831319",
+  appId: "1:90951831319:web:584fc8b7911418bc173152",
+  measurementId: "G-MZG26NBKJV"
+};
+
+  try {
+    const appFirebase = initializeApp(firebaseConfig);
+    window.firestoreDB = getFirestore(appFirebase);
+    window.firestoreDoc = doc;
+    window.firestoreGetDoc = getDoc;
+    window.firestoreSetDoc = setDoc;
+    window.firestoreOnSnapshot = onSnapshot;
+    window.firestoreCollection = collection;
+    window.firestoreGetDocs = getDocs;
+    window.firestoreDeleteDoc = deleteDoc;
+    window.firestoreQuery = query;
+    window.firestoreWhere = where;
+    window.firebasePronto = true;
+  } catch (e) {
+    window.firebasePronto = false;
+  }
+</script>
+
+<script>
+const LARGURA = 38;
+
+const CONFIG = { velocidade: 18, velocidadeChave: "media", tema: "fosforo", som: true, onda: "square" };
+
+const TEMAS = [
+  { chave: "fosforo", nome: "Fósforo Verde" },
+  { chave: "ambar", nome: "Âmbar" },
+  { chave: "dos", nome: "DOS Azul" },
+];
+
+const ONDAS = [
+  { chave: "square", nome: "Quadrada" },
+  { chave: "triangle", nome: "Triangular" },
+  { chave: "sawtooth", nome: "Serrilhada" },
+];
+
+const VELOCIDADES = [
+  { chave: "devagar", nome: "Devagar", ms: 40 },
+  { chave: "media", nome: "Média", ms: 18 },
+  { chave: "rapida", nome: "Rápida", ms: 7 },
+  { chave: "off", nome: "Sem efeito", ms: 0 },
+];
+
+function aplicarTema(chave) {
+  CONFIG.tema = chave;
+  document.body.className = "tema-" + chave;
+}
+
+// ================= SOM (Web Audio API - sem nenhum arquivo de áudio) =================
+
+let audioCtx = null;
+
+function iniciarAudio() {
+  if (audioCtx) return;
+  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+  catch (e) { audioCtx = null; }
+}
+
+const COMPENSACAO_ONDA = { square: 0.6, triangle: 1.0, sawtooth: 0.85 };
+
+function tocarTom(frequencia, duracao, tipoOnda, atraso, volume) {
+  if (!CONFIG.som || !audioCtx) return;
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  try {
+    const tipo = tipoOnda || CONFIG.onda;
+    const osc = audioCtx.createOscillator();
+    const ganho = audioCtx.createGain();
+    osc.type = tipo;
+    osc.frequency.value = frequencia;
+    const inicio = audioCtx.currentTime + (atraso || 0);
+    const pico = (volume || 0.18) * (COMPENSACAO_ONDA[tipo] || 1);
+    ganho.gain.setValueAtTime(pico, inicio);
+    ganho.gain.exponentialRampToValueAtTime(0.001, inicio + duracao);
+    osc.connect(ganho).connect(audioCtx.destination);
+    osc.start(inicio);
+    osc.stop(inicio + duracao);
+  } catch (e) {}
+}
+
+function somTecla() { tocarTom(1046, 0.03); }
+function somConfirmar() { tocarTom(660, 0.05); }
+function somAcerto() { tocarTom(523, 0.09); tocarTom(659, 0.09, null, 0.09); tocarTom(784, 0.2, null, 0.18); }
+function somErro() { tocarTom(392, 0.14, null, 0, 0.26); tocarTom(311, 0.14, null, 0.14, 0.26); tocarTom(233, 0.4, null, 0.28, 0.26); }
+function somPreviaOnda() { tocarTom(440, 0.14); tocarTom(554, 0.14, null, 0.14); tocarTom(659, 0.22, null, 0.28); }
+
+// ================= TRILHA SONORA (MIDI) =================
+
+let ALUNO_ATUAL = null;
+let ALUNO_TURMA = null;
+let ALUNO_REGISTRA = false;
+
+let listaTrilhas = ["Sem música"];
+let indiceTrilha = 0;
+
+async function carregarTrilhas() {
+  try {
+    const nomes = await buscarLista("trilhas/lista.txt");
+    listaTrilhas = ["Sem música", ...nomes];
+  } catch (e) {
+    listaTrilhas = ["Sem música"];
+  }
+}
+
+function aplicarTrilha() {
+  const player = document.getElementById("trilha");
+  try { player.stop(); } catch (e) {}
+  if (indiceTrilha === 0) {
+    player.removeAttribute("src");
+  } else {
+    player.loop = true;
+    player.src = "trilhas/" + listaTrilhas[indiceTrilha];
+  }
+}
+
+function mudarTrilha(direcao) {
+  indiceTrilha = (indiceTrilha + direcao + listaTrilhas.length) % listaTrilhas.length;
+  aplicarTrilha();
+}
+
+const elementoTrilha = document.getElementById("trilha");
+if (elementoTrilha) {
+  elementoTrilha.addEventListener("load", () => {
+    if (indiceTrilha !== 0) {
+      try { elementoTrilha.start(); } catch (e) {}
+    }
+  });
+}
+
+// ================= RESULTADO (Firebase Firestore - tempo real) =================
+
+function idDocumentoResultado(quiz, aluno) {
+  return quiz + "__" + String(aluno).replace(/[^a-zA-Z0-9À-ÿ]/g, "_");
+}
+
+async function jaRespondeuQuiz(quiz, aluno) {
+  if (!window.firebasePronto) return false;
+  try {
+    const ref = window.firestoreDoc(window.firestoreDB, "resultados", idDocumentoResultado(quiz, aluno));
+    const snap = await window.firestoreGetDoc(ref);
+    return snap.exists();
+  } catch (e) {
+    return false;
+  }
+}
+
+async function enviarResultado(quiz, gabarito, respostas, acertos, nota, cfg, atingiuMeta) {
+  if (!ALUNO_REGISTRA) return null;
+  if (!window.firebasePronto) { console.error("Firebase não está pronto."); return false; }
+  try {
+    const ref = window.firestoreDoc(window.firestoreDB, "resultados", idDocumentoResultado(quiz, ALUNO_ATUAL));
+    await window.firestoreSetDoc(ref, {
+      quiz: quiz, turma: ALUNO_TURMA, aluno: ALUNO_ATUAL,
+      gabarito: gabarito, respostas: respostas,
+      acertos: acertos, nota: nota, config: cfg, atingiuMeta: !!atingiuMeta,
+      data: new Date().toISOString(),
+    });
+    return true;
+  } catch (e) { console.error("Erro ao enviar resultado:", e); return false; }
+}
+
+// ================= UTIL: DIGITAR =================
+
+function pausar(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+let PULAR_TELA = false;
+let removerSkip = null;
+
+function armarSkip() {
+  if (removerSkip) removerSkip();
+  const aoInteragir = () => { PULAR_TELA = true; };
+  const timer = setTimeout(() => {
+    document.addEventListener("click", aoInteragir);
+    document.addEventListener("keydown", aoInteragir);
+  }, 150);
+  removerSkip = () => {
+    clearTimeout(timer);
+    document.removeEventListener("click", aoInteragir);
+    document.removeEventListener("keydown", aoInteragir);
+  };
+}
+
+async function digitar(container, texto, classe) {
+  const span = document.createElement("span");
+  if (classe) span.className = classe;
+  container.appendChild(span);
+
+  if (PULAR_TELA || CONFIG.velocidade === 0) { span.textContent = texto; return span; }
+
+  let contador = 0;
+  for (const letra of texto) {
+    if (PULAR_TELA) { span.textContent = texto; break; }
+    span.textContent += letra;
+    contador++;
+    if (contador % 2 === 0) somTecla();
+    await pausar(CONFIG.velocidade);
+  }
+  return span;
+}
+
+async function digitarParagrafo(container, texto, classe) {
+  const p = document.createElement("p");
+  container.appendChild(p);
+  await digitar(p, texto, classe);
+}
+
+function linhaOrnamento(caractere) {
+  const div = document.createElement("div");
+  div.className = "linha-topo";
+  div.textContent = caractere.repeat(LARGURA);
+  return div;
+}
+
+function cabecalho(titulo) {
+  PULAR_TELA = false;
+  armarSkip();
+  const tela = document.getElementById("tela");
+  tela.innerHTML = "";
+  tela.appendChild(linhaOrnamento("="));
+  const h1 = document.createElement("h1");
+  h1.className = "cabecalho";
+  h1.textContent = titulo;
+  tela.appendChild(h1);
+  tela.appendChild(linhaOrnamento("="));
+  const corpo = document.createElement("div");
+  corpo.className = "corpo";
+  tela.appendChild(corpo);
+  return corpo;
+}
+
+function criarBotao(html, aoClicar, selecionada, opcoes) {
+  const config = opcoes || {};
+  const botao = document.createElement("button");
+  botao.className = "opcao" + (selecionada ? " selecionada" : "");
+  botao.innerHTML = html;
+  botao.onclick = (ev) => {
+    ev.stopPropagation();
+    if (config.podeClicar && !config.podeClicar()) return;
+    if (!config.semSom) somConfirmar();
+    aoClicar();
+  };
+  return botao;
+}
+
+// ================= FETCH DE ARQUIVOS =================
+
+async function buscarTexto(caminho) {
+  const resposta = await fetch(caminho, { cache: "no-store" });
+  if (!resposta.ok) throw new Error("Não encontrei: " + caminho);
+  return await resposta.text();
+}
+
+async function buscarLista(caminho) {
+  const texto = await buscarTexto(caminho);
+  return texto.split(/\r\n|\r|\n/).map(l => l.trim()).filter(l => l !== "");
+}
+
+// ================= PARSER DE QUESTÕES =================
+
+function carregarQuestoes(texto) {
+  const linhas = texto.split(/\r\n|\r|\n/).map(l => l.trim());
+  const questoes = [];
+  let questao = { textos: [], item: "", alternativas: [], resposta: "" };
+  let marcador = "";
+  const padraoAlternativa = /^([A-Ea-e1-5])\s*[)\.:\-]\s*(.*)$/;
+
+  for (const linha of linhas) {
+    if (linha === "===") {
+      if (questao.item !== "") questoes.push(questao);
+      questao = { textos: [], item: "", alternativas: [], resposta: "" };
+      marcador = "";
+    } else if (linha === "TEXTO:") {
+      marcador = "texto";
+      questao.textos.push("");
+    } else if (linha === "ITEM:") {
+      marcador = "item";
+      questao.item = "";
+    } else if (padraoAlternativa.test(linha)) {
+      marcador = "alternativa";
+      const m = linha.match(padraoAlternativa);
+      questao.alternativas.push({ rotulo: m[1], texto: m[2].trim() });
+    } else if (linha === "RESPOSTA:") {
+      marcador = "resposta";
+    } else if (linha === "") {
+      if (marcador === "texto" && questao.textos[questao.textos.length - 1] !== "") {
+        questao.textos[questao.textos.length - 1] += "\n";
+      } else if (marcador === "item" && questao.item !== "") {
+        questao.item += "\n";
+      }
+    } else {
+      if (marcador === "texto") {
+        const i = questao.textos.length - 1;
+        questao.textos[i] = questao.textos[i] === "" ? linha : questao.textos[i] + "\n" + linha;
+      } else if (marcador === "item") {
+        questao.item = questao.item === "" ? linha : questao.item + "\n" + linha;
+      } else if (marcador === "alternativa") {
+        const i = questao.alternativas.length - 1;
+        questao.alternativas[i].texto = questao.alternativas[i].texto === "" ? linha : questao.alternativas[i].texto + "\n" + linha;
+      } else if (marcador === "resposta") {
+        questao.resposta = questao.resposta === "" ? linha : questao.resposta + "\n" + linha;
+      }
+    }
+  }
+  if (questao.item !== "") questoes.push(questao);
+  return questoes;
+}
+
+const MAPA_POSICAO_LETRA = { "1": "A", "2": "B", "3": "C", "4": "D", "5": "E" };
+
+function normalizarAlternativa(valor) {
+  if (!valor) return null;
+  valor = valor.trim().toUpperCase().replace(/[.):\s\-]/g, "");
+  if (valor === "") return null;
+  const mapa = { A: "1", B: "2", C: "3", D: "4", E: "5" };
+  if (mapa[valor]) return mapa[valor];
+  if (/^\d+$/.test(valor)) return valor;
+  return null;
+}
+
+function embaralhar(lista) {
+  const copia = lista.slice();
+  for (let i = copia.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copia[i], copia[j]] = [copia[j], copia[i]];
+  }
+  return copia;
+}
+
+// ================= LOGIN (TURMAS/ALUNOS) =================
+
+let turmasCache = null;
+
+async function carregarTurmasCache() {
+  if (turmasCache) return turmasCache;
+  turmasCache = [];
+  try {
+    const linhas = await buscarLista("turmas/turmas.txt");
+    for (const linha of linhas) {
+      const partes = linha.split(" - ").map(p => p.trim());
+      if (partes.length >= 2 && partes[1].toLowerCase().endsWith(".txt")) {
+        turmasCache.push({ titulo: partes[0], arquivo: partes[1], senha: partes.length >= 3 ? partes[2] : null });
+      } else if (partes.length === 2) {
+        turmasCache.push({ titulo: partes[0], arquivo: null, senha: partes[1] });
+      } else {
+        turmasCache.push({ titulo: partes[0], arquivo: null, senha: null });
+      }
+    }
+  } catch (e) { turmasCache = []; }
+  return turmasCache;
+}
+
+async function carregarRoster(arquivo) {
+  let alunos = [];
+  try {
+    const linhas = await buscarLista("turmas/" + arquivo);
+    for (const linha of linhas) {
+      if (linha.includes(" - ")) {
+        const [nome, senha] = linha.split(" - ").map(s => s.trim());
+        alunos.push({ nome, senha });
+      } else {
+        alunos.push({ nome: linha, senha: null });
+      }
+    }
+  } catch (e) { alunos = []; }
+  return alunos;
+}
+
+async function telaSenha(senhaEsperada, aoAcertar, aoCancelar) {
+  const corpo = cabecalho("Senha");
+  await digitarParagrafo(corpo, "Digite sua senha:");
+
+  const campo = document.createElement("input");
+  campo.type = "text";
+  campo.inputMode = "numeric";
+  campo.autocomplete = "off";
+  corpo.appendChild(campo);
+  setTimeout(() => campo.focus(), 50);
+
+  const mensagemErro = document.createElement("p");
+  mensagemErro.className = "erro-texto";
+  corpo.appendChild(mensagemErro);
+
+  const confirmar = () => {
+    if (campo.value.trim() === senhaEsperada) {
+      somConfirmar();
+      aoAcertar();
+    } else {
+      somErro();
+      mensagemErro.textContent = "Senha incorreta. Tente novamente.";
+      campo.value = "";
+      campo.focus();
+    }
+  };
+
+  campo.onkeydown = (ev) => { if (ev.key === "Enter") confirmar(); };
+  corpo.appendChild(criarBotao("Confirmar", confirmar, false, { semSom: true }));
+  corpo.appendChild(criarBotao("Voltar", aoCancelar));
+}
+
+
+function abrirProfessor() {
+  if (window.telaProfessor) { window.telaProfessor(); return; }
+  const s = document.createElement("script");
+  s.src = "professor.js?v=" + Date.now();
+  s.onload = () => window.telaProfessor();
+  s.onerror = async () => {
+    const corpo = cabecalho("Professor");
+    await digitarParagrafo(corpo, "Não consegui carregar o painel (professor.js).", "erro-texto");
+    corpo.appendChild(criarBotao("Voltar", telaLogin));
+  };
+  document.body.appendChild(s);
+}
+
+async function telaLogin() {
+  const corpo = cabecalho("Login");
+  const turmas = await carregarTurmasCache();
+
+  if (turmas.length === 0) {
+    await digitarParagrafo(corpo, "Nenhuma turma cadastrada ainda.", "erro-texto");
+    corpo.appendChild(criarBotao("Continuar sem login", () => {
+      ALUNO_ATUAL = null; ALUNO_TURMA = null; ALUNO_REGISTRA = false;
+      telaMenu();
+    }));
+    return;
+  }
+
+  for (const turma of turmas) {
+    corpo.appendChild(criarBotao('<span class="rotulo">›</span>' + turma.titulo, () => selecionarTurma(turma)));
+  }
+}
+
+function selecionarTurma(turma) {
+  if (turma.senha) {
+    telaSenha(turma.senha, () => prosseguirTurma(turma), telaLogin);
+  } else {
+    prosseguirTurma(turma);
+  }
+}
+
+function ehProfessor(turma) {
+  return turma.arquivo === null && turma.titulo.trim().toLowerCase() === "professor";
+}
+
+async function prosseguirTurma(turma) {
+  if (ehProfessor(turma)) {
+    if (!turma.senha) {
+      const corpo = cabecalho("Professor");
+      await digitarParagrafo(corpo, "Defina uma senha em turmas.txt, assim: Professor - 123456", "erro-texto");
+      corpo.appendChild(criarBotao("Voltar", telaLogin));
+      return;
+    }
+    ALUNO_ATUAL = null; ALUNO_TURMA = null; ALUNO_REGISTRA = false;
+    abrirProfessor();
+    return;
+  }
+  if (turma.arquivo === null) {
+    ALUNO_ATUAL = turma.titulo;
+    ALUNO_TURMA = null;
+    ALUNO_REGISTRA = false;
+    telaMenu();
+    return;
+  }
+  const roster = await carregarRoster(turma.arquivo);
+  telaAlunos(turma, roster);
+}
+
+async function telaAlunos(turma, roster) {
+  const corpo = cabecalho(turma.titulo);
+
+  if (roster.length === 0) {
+    await digitarParagrafo(corpo, "Essa turma não tem alunos cadastrados.", "erro-texto");
+    corpo.appendChild(criarBotao("Voltar", telaLogin));
+    return;
+  }
+
+  for (const aluno of roster) {
+    corpo.appendChild(criarBotao('<span class="rotulo">›</span>' + aluno.nome, () => selecionarAluno(turma, aluno, roster)));
+  }
+  corpo.appendChild(criarBotao("Voltar", telaLogin));
+}
+
+function selecionarAluno(turma, aluno, roster) {
+  if (aluno.senha) {
+    telaSenha(aluno.senha, () => confirmarLogin(turma, aluno), () => telaAlunos(turma, roster));
+  } else {
+    confirmarLogin(turma, aluno);
+  }
+}
+
+// ================= SESSÃO (controle de sala em tempo real) =================
+
+let intervaloHeartbeat = null;
+let pararEscutaBloqueio = null;
+
+function idSessao(aluno) {
+  return String(aluno).replace(/[^a-zA-Z0-9À-ÿ]/g, "_");
+}
+
+function atualizarProgresso(campos) {
+  if (!ALUNO_REGISTRA || !ALUNO_ATUAL || !window.firebasePronto) return;
+  try {
+    const ref = window.firestoreDoc(window.firestoreDB, "sessoes", idSessao(ALUNO_ATUAL));
+    window.firestoreSetDoc(ref, { ...campos, ultimoPing: new Date().toISOString() }, { merge: true }).catch(() => {});
+  } catch (e) {}
+}
+
+async function verificarSessaoAtiva(aluno) {
+  if (!window.firebasePronto) return null;
+  try {
+    const ref = window.firestoreDoc(window.firestoreDB, "sessoes", idSessao(aluno));
+    const snap = await window.firestoreGetDoc(ref);
+    if (!snap.exists()) return null;
+    const dados = snap.data();
+    const ultimoPing = dados.ultimoPing ? new Date(dados.ultimoPing).getTime() : 0;
+    const segundosParado = (Date.now() - ultimoPing) / 1000;
+    if (dados.ativo && segundosParado < 60) return dados;
+    return null;
+  } catch (e) {
+    console.error("Erro ao verificar sessão ativa:", e);
+    return null;
+  }
+}
+
+async function abrirSessao(aluno, turma) {
+  encerrarEscutaLocal();
+
+  if (!window.firebasePronto) return;
+
+  try {
+    const ref = window.firestoreDoc(window.firestoreDB, "sessoes", idSessao(aluno));
+    await window.firestoreSetDoc(ref, {
+      aluno: aluno,
+      turma: turma || "",
+      entrou: new Date().toISOString(),
+      ultimoPing: new Date().toISOString(),
+      ativo: true,
+      bloqueado: false,
+    });
+
+    intervaloHeartbeat = setInterval(() => {
+      window.firestoreSetDoc(ref, { ultimoPing: new Date().toISOString() }, { merge: true }).catch(() => {});
+    }, 20000);
+
+    pararEscutaBloqueio = window.firestoreOnSnapshot(ref, (snap) => {
+      const dados = snap.data();
+      if (dados && dados.bloqueado) encerrarPorBloqueio();
+    });
+  } catch (e) {
+    console.error("Erro ao abrir sessão:", e);
+  }
+}
+
+function encerrarEscutaLocal() {
+  if (intervaloHeartbeat) { clearInterval(intervaloHeartbeat); intervaloHeartbeat = null; }
+  if (pararEscutaBloqueio) { pararEscutaBloqueio(); pararEscutaBloqueio = null; }
+}
+
+async function sairDaSessao() {
+  const alunoAnterior = ALUNO_ATUAL;
+  encerrarEscutaLocal();
+  if (alunoAnterior && window.firebasePronto) {
+    try {
+      const ref = window.firestoreDoc(window.firestoreDB, "sessoes", idSessao(alunoAnterior));
+      await window.firestoreSetDoc(ref, { ativo: false }, { merge: true });
+    } catch (e) {}
+  }
+  telaLogin();
+}
+
+async function encerrarPorBloqueio() {
+  encerrarEscutaLocal();
+  const corpo = cabecalho("Sessão encerrada");
+  await digitarParagrafo(corpo, "O professor encerrou sua sessão.", "erro-texto");
+  corpo.appendChild(criarBotao("Voltar ao login", telaLogin));
+}
+
+async function perfilBloqueado(aluno) {
+  if (!window.firebasePronto) return false;
+  try {
+    const snap = await window.firestoreGetDoc(window.firestoreDoc(window.firestoreDB, "sessoes", idSessao(aluno)));
+    return snap.exists() && snap.data().bloqueado === true;
+  } catch (e) { return false; }
+}
+
+async function confirmarLogin(turma, aluno) {
+  if (await perfilBloqueado(aluno.nome)) {
+    const corpoB = cabecalho("Login");
+    await digitarParagrafo(corpoB, "Este perfil está bloqueado pelo professor.", "erro-texto");
+    corpoB.appendChild(criarBotao("Voltar", telaLogin));
+    return;
+  }
+  const sessaoExistente = await verificarSessaoAtiva(aluno.nome);
+  if (sessaoExistente) {
+    const corpo = cabecalho("Login");
+    await digitarParagrafo(corpo, "Esse perfil já está em uso em outro aparelho agora.", "erro-texto");
+    await digitarParagrafo(corpo, "Avise o professor antes de continuar.");
+    corpo.appendChild(criarBotao("Tentar mesmo assim", () => prosseguirLoginConfirmado(turma, aluno)));
+    corpo.appendChild(criarBotao("Voltar", telaLogin));
+    return;
+  }
+  prosseguirLoginConfirmado(turma, aluno);
+}
+
+function prosseguirLoginConfirmado(turma, aluno) {
+  ALUNO_ATUAL = aluno.nome;
+  ALUNO_TURMA = turma.titulo;
+  ALUNO_REGISTRA = true;
+  abrirSessao(aluno.nome, turma.titulo);
+  telaMenu();
+}
+
+// ================= TELAS =================
+
+async function telaIntro() {
+  const corpo = cabecalho("Quiz Literário");
+  try {
+    const texto = await buscarTexto("telas/intro.txt");
+    for (const linha of texto.split(/\r\n|\r|\n/)) {
+      if (linha.trim() !== "") await digitarParagrafo(corpo, linha);
+    }
+  } catch (e) {
+    await digitarParagrafo(corpo, "Pressione para começar.");
+  }
+  const dica = document.createElement("p");
+  dica.className = "rodape-dica";
+  dica.textContent = "toque na tela para continuar";
+  corpo.appendChild(dica);
+  await new Promise(resolver => {
+    document.addEventListener("click", () => {
+      iniciarAudio();
+      try { if (window.Tone) Tone.start(); } catch (e) {}
+      resolver();
+    }, { once: true });
+  });
+  telaLogin();
+}
+
+async function telaMenu() {
+  const corpo = cabecalho("Menu");
+  if (ALUNO_ATUAL) {
+    const quemEsta = document.createElement("p");
+    quemEsta.className = "rodape-dica";
+    quemEsta.textContent = "logado como: " + ALUNO_ATUAL;
+    corpo.appendChild(quemEsta);
+  }
+  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Jogar', telaCategorias));
+  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Configurações', telaConfiguracoes));
+  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Créditos', telaCreditos));
+  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Trocar de usuário', sairDaSessao));
+}
+
+async function telaConfiguracoes() {
+  const corpo = cabecalho("Configurações");
+
+  function titulo(texto) {
+    const p = document.createElement("p");
+    p.className = "destaque-texto";
+    p.textContent = texto;
+    corpo.appendChild(p);
+  }
+
+  titulo("Tema:");
+  for (const tema of TEMAS) {
+    corpo.appendChild(criarBotao(tema.nome, () => { aplicarTema(tema.chave); telaConfiguracoes(); }, CONFIG.tema === tema.chave));
+  }
+
+  titulo("Efeito de digitação:");
+  for (const v of VELOCIDADES) {
+    corpo.appendChild(criarBotao(v.nome, () => { CONFIG.velocidade = v.ms; CONFIG.velocidadeChave = v.chave; telaConfiguracoes(); }, CONFIG.velocidadeChave === v.chave));
+  }
+
+  titulo("Som:");
+  corpo.appendChild(criarBotao(CONFIG.som ? "Ligado" : "Desligado", () => { CONFIG.som = !CONFIG.som; telaConfiguracoes(); }));
+
+  titulo("Tipo de onda:");
+  for (const onda of ONDAS) {
+    corpo.appendChild(criarBotao(onda.nome, () => { CONFIG.onda = onda.chave; somPreviaOnda(); telaConfiguracoes(); }, CONFIG.onda === onda.chave, { semSom: true }));
+  }
+
+  titulo("Trilha sonora:");
+  const linhaTrilha = document.createElement("div");
+  linhaTrilha.className = "opcao";
+  linhaTrilha.style.display = "flex";
+  linhaTrilha.style.justifyContent = "space-between";
+  linhaTrilha.style.alignItems = "center";
+
+  const criarSeta = (simbolo, direcao) => {
+    const seta = document.createElement("button");
+    seta.textContent = simbolo;
+    seta.style.cssText = "background:none;border:none;color:var(--destaque);font-size:20px;";
+    seta.onclick = (ev) => { ev.stopPropagation(); somConfirmar(); mudarTrilha(direcao); telaConfiguracoes(); };
+    return seta;
+  };
+
+  const nomeTrilha = document.createElement("span");
+  nomeTrilha.textContent = listaTrilhas[indiceTrilha];
+
+  linhaTrilha.appendChild(criarSeta("‹", -1));
+  linhaTrilha.appendChild(nomeTrilha);
+  linhaTrilha.appendChild(criarSeta("›", 1));
+
+  let toqueInicialX = null;
+  linhaTrilha.addEventListener("touchstart", (ev) => { toqueInicialX = ev.touches[0].clientX; });
+  linhaTrilha.addEventListener("touchend", (ev) => {
+    if (toqueInicialX === null) return;
+    const diferenca = ev.changedTouches[0].clientX - toqueInicialX;
+    if (Math.abs(diferenca) > 40) {
+      somConfirmar();
+      mudarTrilha(diferenca < 0 ? 1 : -1);
+      telaConfiguracoes();
+    }
+    toqueInicialX = null;
+  });
+  corpo.appendChild(linhaTrilha);
+
+  corpo.appendChild(criarBotao("Voltar", telaMenu));
+}
+
+async function telaCreditos() {
+  const corpo = cabecalho("Créditos");
+  try {
+    const texto = await buscarTexto("telas/creditos.txt");
+    for (const linha of texto.split(/\r\n|\r|\n/)) {
+      if (linha.trim() !== "") await digitarParagrafo(corpo, linha);
+    }
+  } catch (e) {
+    await digitarParagrafo(corpo, "Sem créditos cadastrados.");
+  }
+  corpo.appendChild(criarBotao("Voltar", telaMenu));
+}
+
+async function telaCategorias() {
+  const corpo = cabecalho("Categorias");
+  let arquivos = [];
+  try {
+    arquivos = await buscarLista("perguntas/lista.txt");
+  } catch (e) {
+    await digitarParagrafo(corpo, "Não encontrei perguntas/lista.txt.", "erro-texto");
+    return;
+  }
+  for (const arquivo of arquivos) {
+    const nome = arquivo.replace(".txt", "");
+    corpo.appendChild(criarBotao('<span class="rotulo">›</span>' + nome, async () => {
+      if (ALUNO_REGISTRA) {
+        const feito = await jaRespondeuQuiz(nome, ALUNO_ATUAL);
+        if (feito) {
+          const avisoCorpo = cabecalho("Categorias");
+          await digitarParagrafo(avisoCorpo, "Você já concluiu este quiz.", "erro-texto");
+          await digitarParagrafo(avisoCorpo, "Fale com seu professor se precisar refazer.");
+          avisoCorpo.appendChild(criarBotao("Voltar", telaCategorias));
+          return;
+        }
+      }
+      telaQuiz(arquivo);
+    }));
+  }
+  corpo.appendChild(criarBotao("Voltar", telaMenu));
+}
+
+const CONFIG_PADRAO = { ordem: "aleatoria", pontuacao: "dez", tempo: 0, modo: "normal", ganho: 1, perda: 1, meta: 10 };
+
+async function carregarConfigQuiz(nome) {
+  const cfg = Object.assign({}, CONFIG_PADRAO);
+  if (!window.firebasePronto) return cfg;
+  try {
+    const snap = await window.firestoreGetDoc(window.firestoreDoc(window.firestoreDB, "configuracoes", nome));
+    if (snap.exists()) Object.assign(cfg, snap.data());
+  } catch (e) { console.error("Erro ao ler configuração do quiz:", e); }
+  if (cfg.modo === "arriscar") cfg.modo = "desafio";
+  return cfg;
+}
+
+function fmt(n) { return String(Math.round(n * 100) / 100); }
+
+function pontuarQuestao(cfg, total, resultado) {
+  if (resultado === "acertou") return cfg.modo === "desafio" ? cfg.ganho : (cfg.pontuacao === "dez" ? 10 / total : 1);
+  if (resultado === "errou" && cfg.modo === "desafio") return -cfg.perda;
+  return 0;
+}
+
+async function telaQuiz(arquivo) {
+  const nomeQuiz = arquivo.replace(".txt", "");
+  const corpo = cabecalho("Quiz Literário");
+  let perguntas;
+  try {
+    perguntas = carregarQuestoes(await buscarTexto("perguntas/" + arquivo));
+  } catch (e) {
+    await digitarParagrafo(corpo, "Não consegui carregar esse quiz.", "erro-texto");
+    return;
+  }
+  if (perguntas.length === 0) {
+    await digitarParagrafo(corpo, "Nenhuma pergunta encontrada nesse arquivo.", "erro-texto");
+    return;
+  }
+
+  const cfg = await carregarConfigQuiz(nomeQuiz);
+  const desafio = cfg.modo === "desafio";
+
+  perguntas.forEach((q, i) => { q.indiceOriginal = i; });
+  const total = perguntas.length;
+  const ordem = cfg.ordem === "sequencial" ? perguntas.slice() : embaralhar(perguntas);
+  const gabaritoLista = perguntas.map(q => MAPA_POSICAO_LETRA[normalizarAlternativa(q.resposta)] || "?");
+  const respostasLista = new Array(total).fill("-");
+  let pontos = 0;
+  let acertos = 0;
+  let atingiuMeta = false;
+  const erros = [];
+
+  const fila = ordem.slice();
+  atualizarProgresso({ quizAtual: nomeQuiz, acao: "lendo", pontos: 0, acertos: 0, total: total, modo: cfg.modo });
+
+  while (fila.length > 0) {
+    const questao = fila.shift();
+    const corpoQ = cabecalho("Quiz Literário");
+    atualizarProgresso({ acao: "lendo" });
+
+    const status = document.createElement("p");
+    status.className = "destaque-texto";
+    status.textContent = desafio
+      ? `Pontos: ${fmt(pontos)} (meta ${cfg.meta}) — restam ${fila.length + 1} ${fila.length === 0 ? "questão" : "questões"}`
+      : `Questão ${total - fila.length} de ${total} — ${cfg.pontuacao === "dez" ? "Nota" : "Pontos"} atual: ${fmt(pontos)}`;
+    corpoQ.appendChild(status);
+
+    let linhaTempo = null;
+    if (cfg.tempo > 0) {
+      linhaTempo = document.createElement("p");
+      linhaTempo.className = "destaque-texto";
+      linhaTempo.textContent = `Tempo: ${cfg.tempo}s`;
+      corpoQ.appendChild(linhaTempo);
+    }
+    corpoQ.appendChild(linhaOrnamento("-"));
+
+    for (const texto of questao.textos) {
+      if (texto.trim() !== "") await digitarParagrafo(corpoQ, texto);
+    }
+    await digitarParagrafo(corpoQ, questao.item, "destaque-texto");
+
+    let liberado = false;
+    let resolverResposta;
+    const promessaResposta = new Promise(r => { resolverResposta = r; });
+    const blocos = [];
+    for (const alternativa of questao.alternativas) {
+      const botao = criarBotao('<span class="rotulo"></span><span class="texto-alt"></span>', () => resolverResposta(alternativa.rotulo), false, { podeClicar: () => liberado });
+      botao.querySelector(".rotulo").textContent = alternativa.rotulo;
+      corpoQ.appendChild(botao);
+      blocos.push({ botao, alternativa });
+    }
+    if (desafio) {
+      corpoQ.appendChild(criarBotao("Pular (a questão volta mais tarde)", () => resolverResposta("PULAR"), false, { podeClicar: () => liberado }));
+    }
+    for (const bloco of blocos) {
+      await digitar(bloco.botao.querySelector(".texto-alt"), bloco.alternativa.texto);
+    }
+    liberado = true;
+
+    let relogio = null;
+    if (linhaTempo) {
+      let restante = cfg.tempo;
+      relogio = setInterval(() => {
+        restante--;
+        linhaTempo.textContent = `Tempo: ${restante}s`;
+        if (restante <= 0) { clearInterval(relogio); resolverResposta("TEMPO"); }
+      }, 1000);
+    }
+    const respostaEscolhida = await promessaResposta;
+    if (relogio) clearInterval(relogio);
+
+    let resultado;
+    if (respostaEscolhida === "PULAR") { resultado = "pulou"; respostasLista[questao.indiceOriginal] = "P"; }
+    else if (respostaEscolhida === "TEMPO") { resultado = desafio ? "pulou" : "tempo"; respostasLista[questao.indiceOriginal] = "T"; }
+    else {
+      const respostaUsuario = normalizarAlternativa(respostaEscolhida);
+      const respostaCerta = normalizarAlternativa(questao.resposta);
+      resultado = (respostaUsuario !== null && respostaUsuario === respostaCerta) ? "acertou" : "errou";
+      respostasLista[questao.indiceOriginal] = MAPA_POSICAO_LETRA[respostaUsuario] || "-";
+    }
+
+    pontos = Math.round((pontos + pontuarQuestao(cfg, total, resultado)) * 100) / 100;
+    if (resultado === "acertou") acertos += 1;
+    atualizarProgresso({ acao: resultado, pontos: pontos, acertos: acertos });
+
+    const feedback = document.createElement("p");
+    if (resultado === "acertou") {
+      feedback.textContent = "Correto!"; feedback.className = "destaque-texto"; somAcerto();
+    } else if (resultado === "pulou") {
+      feedback.textContent = (respostaEscolhida === "TEMPO" ? "Tempo esgotado! " : "Você pulou. ") + "A questão volta mais tarde.";
+      feedback.className = "erro-texto";
+      fila.push(questao);
+    } else {
+      feedback.textContent = resultado === "errou" ? "Errado!" : "Tempo esgotado!";
+      feedback.className = "erro-texto";
+      somErro();
+      const indiceCerta = parseInt(normalizarAlternativa(questao.resposta) || "0", 10) - 1;
+      const alternativaCerta = questao.alternativas[indiceCerta];
+      erros.push({
+        item: questao.item,
+        rotulo: alternativaCerta ? alternativaCerta.rotulo : "?",
+        texto: alternativaCerta ? alternativaCerta.texto : "",
+      });
+    }
+    corpoQ.appendChild(feedback);
+
+    if (desafio && pontos >= cfg.meta) {
+      atingiuMeta = true;
+      const meta = document.createElement("p");
+      meta.className = "destaque-texto";
+      meta.textContent = `Meta de ${cfg.meta} pontos atingida!`;
+      corpoQ.appendChild(meta);
+    }
+
+    await new Promise(resolver => { corpoQ.appendChild(criarBotao("Continuar", resolver)); });
+    if (atingiuMeta) break;
+  }
+
+  atualizarProgresso({ acao: "terminou", pontos: Math.round(pontos * 100) / 100, acertos: acertos });
+  pontos = Math.round(pontos * 100) / 100;
+  const envioOk = await enviarResultado(nomeQuiz, gabaritoLista, respostasLista, acertos, pontos, cfg, atingiuMeta);
+  await telaResultado(pontos, acertos, total, erros, envioOk, cfg, atingiuMeta);
+}
+
+async function telaResultado(pontos, acertos, total, erros, envioOk, cfg, atingiuMeta) {
+  const corpo = cabecalho("Resultado");
+  if (cfg.modo === "desafio") {
+    await digitarParagrafo(corpo, `Pontos: ${fmt(pontos)} (meta ${cfg.meta})${atingiuMeta ? " - meta atingida!" : ""}`, "destaque-texto");
+    await digitarParagrafo(corpo, `Acertos: ${acertos}`);
+    if (!atingiuMeta) await digitarParagrafo(corpo, "Você respondeu todas as questões sem atingir a meta.");
+  } else if (cfg.pontuacao === "dez") {
+    await digitarParagrafo(corpo, `Nota final: ${pontos.toFixed(2)}`, "destaque-texto");
+    await digitarParagrafo(corpo, `Acertos: ${acertos} de ${total}`);
+  } else {
+    await digitarParagrafo(corpo, `Pontos: ${fmt(pontos)} de ${total}`, "destaque-texto");
+  }
+
+  if (envioOk === true) await digitarParagrafo(corpo, "Resultado salvo.", "destaque-texto");
+  else if (envioOk === false) await digitarParagrafo(corpo, "Não foi possível salvar o resultado (verifique a internet).", "erro-texto");
+
+  if (erros.length > 0) {
+    corpo.appendChild(linhaOrnamento("-"));
+    await digitarParagrafo(corpo, "Revisão:", "destaque-texto");
+    for (const erro of erros) {
+      await digitarParagrafo(corpo, erro.item);
+      await digitarParagrafo(corpo, `Resposta certa: ${erro.rotulo} - ${erro.texto}`);
+    }
+  }
+  corpo.appendChild(criarBotao("Voltar ao início", telaMenu));
+}
+
+aplicarTema(CONFIG.tema);
+carregarTrilhas();
+telaIntro();
+</script>
+</body>
+</html>
