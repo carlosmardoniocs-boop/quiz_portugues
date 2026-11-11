@@ -4,10 +4,11 @@ window.telaProfessor = function () {
   const corpo = cabecalho("Professor");
   corpo.appendChild(criarBotao('<span class="rotulo">›</span>Configurar quizzes', profListaQuizzes));
   corpo.appendChild(criarBotao('<span class="rotulo">›</span>Acompanhar turma', profEscolherTurma));
+  corpo.appendChild(criarBotao('<span class="rotulo">›</span>Gerar planilha', profEscolherTurmaPlanilha));
   corpo.appendChild(criarBotao("Sair do painel", telaLogin));
   const versao = document.createElement("p");
   versao.className = "rodape-dica";
-  versao.textContent = "painel v3b (etapas 1 a 3)";
+  versao.textContent = "painel v4 (etapas 1 a 4)";
   corpo.appendChild(versao);
 };
 
@@ -233,4 +234,177 @@ async function profResultadosAluno(turma, aluno) {
     corpo.appendChild(b);
   }
   corpo.appendChild(criarBotao("Voltar", () => profAcompanhar(turma)));
+}
+
+
+// ===== ETAPA 4: PLANILHA (.xlsx) =====
+
+const PROF_CORES = {
+  ok: "FFE2F0D9", erro: "FFFADBD8", gabarito: "FFFFF2CC", media: "FFD9EAD3",
+  adequado: "FF1B5E20", intermediario: "FFA9D18E", critico: "FFFFD966", muito_critico: "FFFF0000",
+};
+const PROF_FAIXAS = [["adequado", "Adequado (75% ou mais)"], ["intermediario", "Intermediário (50 a 75%)"], ["critico", "Crítico (25 a 50%)"], ["muito_critico", "Muito crítico (abaixo de 25%)"]];
+
+function profFaixa(p) { return p >= 75 ? "adequado" : p >= 50 ? "intermediario" : p >= 25 ? "critico" : "muito_critico"; }
+
+function profMontarPlanilha(roster, docs, quiz, turma) {
+  const gabarito = docs[0].gabarito || [];
+  const n = gabarito.length;
+  const porNome = {};
+  docs.forEach(d => { porNome[d.aluno] = d; });
+  const nomes = roster.map(a => a.nome);
+  docs.forEach(d => { if (!nomes.includes(d.aluno)) nomes.push(d.aluno); });
+
+  const cfg0 = Object.assign({ modo: "normal", pontuacao: "dez", ganho: 1, perda: 1, meta: 10 }, docs[0].config || {});
+  const rotuloNota = (cfg0.modo === "desafio" || cfg0.pontuacao === "pontos") ? "Pontos" : "Nota";
+
+  const linhas = [];
+  const certos = new Array(n).fill(0), validos = new Array(n).fill(0);
+  const contagemFaixas = { adequado: 0, intermediario: 0, critico: 0, muito_critico: 0 };
+  let somaNotas = 0, respondentes = 0;
+
+  for (const nome of nomes) {
+    const d = porNome[nome];
+    if (!d) { linhas.push({ nome, feito: false }); continue; }
+    const cfg = Object.assign({}, cfg0, d.config || {});
+    const desafio = cfg.modo === "desafio";
+    const resp = d.respostas || [];
+    const estados = [], celulas = [];
+    let acertos = 0, erros = 0;
+    for (let i = 0; i < n; i++) {
+      const r = resp[i] === undefined ? "-" : resp[i];
+      celulas.push(r);
+      let est = "branco";
+      const letra = /^[A-E]$/.test(r);
+      if (letra) est = r === gabarito[i] ? "ok" : "erro";
+      else if (r === "T" && !desafio) est = "erro";
+      estados.push(est);
+      if (est === "ok") acertos++;
+      if (est === "erro" && letra) erros++;
+      if (est !== "branco") { validos[i]++; if (est === "ok") certos[i]++; }
+    }
+    let pontos, percentual;
+    if (desafio) { pontos = acertos * cfg.ganho - erros * cfg.perda; percentual = cfg.meta > 0 ? Math.max(0, pontos) / cfg.meta * 100 : 0; }
+    else if (cfg.pontuacao === "pontos") { pontos = acertos; percentual = n ? acertos / n * 100 : 0; }
+    else { pontos = n ? acertos * 10 / n : 0; percentual = pontos * 10; }
+    pontos = Math.round(pontos * 100) / 100;
+    const faixa = profFaixa(percentual);
+    contagemFaixas[faixa]++;
+    somaNotas += pontos;
+    respondentes++;
+    linhas.push({ nome, feito: true, celulas, estados, acertos, pontos, faixa });
+  }
+  const percentuais = certos.map((c, i) => validos[i] ? Math.round(c / validos[i] * 1000) / 10 : null);
+  const media = respondentes ? Math.round(somaNotas / respondentes * 100) / 100 : null;
+  return { titulo: quiz + " - " + turma, n, gabarito, rotuloNota, linhas, percentuais, media, contagemFaixas, respondentes };
+}
+
+function profCarregarExcelJS() {
+  if (window.ExcelJS) return Promise.resolve();
+  const urls = ["https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js", "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"];
+  return new Promise((resolve, reject) => {
+    const tentar = (i) => {
+      if (i >= urls.length) { reject(new Error("biblioteca de planilha indisponível")); return; }
+      const s = document.createElement("script");
+      s.src = urls[i];
+      s.onload = () => (window.ExcelJS ? resolve() : tentar(i + 1));
+      s.onerror = () => tentar(i + 1);
+      document.head.appendChild(s);
+    };
+    tentar(0);
+  });
+}
+
+async function profBaixarPlanilha(plan) {
+  await profCarregarExcelJS();
+  const wb = new window.ExcelJS.Workbook();
+  const ws = wb.addWorksheet(plan.titulo.replace(/[:\\\/?*\[\]]/g, "-").slice(0, 31));
+  const pintar = (cel, argb) => { cel.fill = { type: "pattern", pattern: "solid", fgColor: { argb } }; };
+  const claro = (faixa) => (faixa === "adequado" || faixa === "muito_critico") ? "FFFFFFFF" : "FF000000";
+  const n = plan.n;
+
+  ws.addRow(["Aluno"].concat(Array.from({ length: n }, (_, i) => "Q" + (i + 1))).concat(["Acertos", plan.rotuloNota])).font = { bold: true };
+  const gab = ws.addRow(["GABARITO"].concat(plan.gabarito).concat(["", ""]));
+  gab.font = { bold: true };
+  gab.eachCell(c => pintar(c, PROF_CORES.gabarito));
+
+  for (const l of plan.linhas) {
+    if (!l.feito) { ws.addRow([l.nome].concat(new Array(n).fill("-")).concat(["-", "-"])); continue; }
+    const row = ws.addRow([l.nome].concat(l.celulas).concat([l.acertos, l.pontos]));
+    l.estados.forEach((est, i) => { if (est === "ok" || est === "erro") pintar(row.getCell(2 + i), PROF_CORES[est]); });
+    const cn = row.getCell(3 + n);
+    pintar(cn, PROF_CORES[l.faixa]);
+    cn.font = { bold: true, color: { argb: claro(l.faixa) } };
+  }
+
+  ws.addRow(["% Acertos"].concat(plan.percentuais.map(p => p === null ? "-" : p + "%")).concat(["", ""])).font = { bold: true };
+  const rm = ws.addRow(["Média da turma", plan.media === null ? "-" : plan.media]);
+  rm.font = { bold: true };
+  rm.eachCell(c => pintar(c, PROF_CORES.media));
+  ws.addRow([]);
+  for (const [chave, rotulo] of PROF_FAIXAS) {
+    const r = ws.addRow([rotulo, plan.contagemFaixas[chave]]);
+    pintar(r.getCell(1), PROF_CORES[chave]);
+    r.getCell(1).font = { bold: true, color: { argb: claro(chave) } };
+  }
+  ws.getColumn(1).width = 30;
+  for (let i = 2; i <= n + 3; i++) ws.getColumn(i).width = 8;
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = plan.titulo.replace(/[\\\/:*?"<>|]/g, "-") + ".xlsx";
+  document.body.appendChild(a);
+  a.click();
+  if (a.remove) a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+async function profEscolherTurmaPlanilha() {
+  const corpo = cabecalho("Gerar planilha");
+  const turmas = (await carregarTurmasCache()).filter(t => t.arquivo);
+  if (!turmas.length) await digitarParagrafo(corpo, "Nenhuma turma com lista de alunos em turmas.txt.", "erro-texto");
+  for (const t of turmas) corpo.appendChild(criarBotao('<span class="rotulo">›</span>' + t.titulo, () => profEscolherQuizPlanilha(t)));
+  corpo.appendChild(criarBotao("Voltar", window.telaProfessor));
+}
+
+async function profEscolherQuizPlanilha(turma) {
+  const corpo = cabecalho(turma.titulo);
+  let arquivos = [];
+  try { arquivos = await buscarLista("perguntas/lista.txt"); } catch (e) {}
+  for (const arq of arquivos) {
+    const nome = arq.replace(".txt", "");
+    corpo.appendChild(criarBotao('<span class="rotulo">›</span>' + nome, () => profGerarPlanilha(turma, nome)));
+  }
+  corpo.appendChild(criarBotao("Voltar", profEscolherTurmaPlanilha));
+}
+
+async function profGerarPlanilha(turma, quiz) {
+  const corpo = cabecalho("Planilha");
+  const aviso = document.createElement("p");
+  aviso.textContent = "Buscando resultados...";
+  corpo.appendChild(aviso);
+  try {
+    const fs = await import(PROF_FS_URL);
+    const snap = await fs.getDocs(fs.query(fs.collection(window.firestoreDB, "resultados"), fs.where("quiz", "==", quiz)));
+    const docs = [];
+    snap.forEach(d => { const x = d.data(); if (x.turma === turma.titulo) docs.push(x); });
+    if (!docs.length) {
+      aviso.textContent = "Nenhum aluno desta turma fez este quiz ainda.";
+    } else {
+      const roster = await carregarRoster(turma.arquivo);
+      const plan = profMontarPlanilha(roster, docs, quiz, turma.titulo);
+      await profBaixarPlanilha(plan);
+      aviso.className = "destaque-texto";
+      aviso.textContent = "Planilha gerada: " + plan.titulo + ".xlsx (veja em Downloads). " + plan.respondentes + " de " + roster.length + " alunos já fizeram. Média: " + (plan.media === null ? "-" : fmt(plan.media)) + ".";
+    }
+  } catch (e) {
+    console.error(e);
+    aviso.className = "erro-texto";
+    aviso.textContent = "Não consegui gerar a planilha. Verifique a internet e tente de novo.";
+  }
+  corpo.appendChild(criarBotao("Gerar de novo", () => profGerarPlanilha(turma, quiz)));
+  corpo.appendChild(criarBotao("Voltar", () => profEscolherQuizPlanilha(turma)));
 }
