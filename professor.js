@@ -8,7 +8,7 @@ window.telaProfessor = function () {
   corpo.appendChild(criarBotao("Sair do painel", telaLogin));
   const versao = document.createElement("p");
   versao.className = "rodape-dica";
-  versao.textContent = "painel v4 (etapas 1 a 4)";
+  versao.textContent = "painel v5 (etapas 1 a 5)";
   corpo.appendChild(versao);
 };
 
@@ -323,6 +323,11 @@ async function profBaixarPlanilha(plan) {
   const claro = (faixa) => (faixa === "adequado" || faixa === "muito_critico") ? "FFFFFFFF" : "FF000000";
   const n = plan.n;
 
+  const titulo = ws.addRow([plan.titulo]);
+  ws.mergeCells(1, 1, 1, n + 3);
+  titulo.font = { bold: true, size: 14 };
+  titulo.alignment = { horizontal: "center" };
+
   ws.addRow(["Aluno"].concat(Array.from({ length: n }, (_, i) => "Q" + (i + 1))).concat(["Acertos", plan.rotuloNota])).font = { bold: true };
   const gab = ws.addRow(["GABARITO"].concat(plan.gabarito).concat(["", ""]));
   gab.font = { bold: true };
@@ -337,10 +342,10 @@ async function profBaixarPlanilha(plan) {
     cn.font = { bold: true, color: { argb: claro(l.faixa) } };
   }
 
-  ws.addRow(["% Acertos"].concat(plan.percentuais.map(p => p === null ? "-" : p + "%")).concat(["", ""])).font = { bold: true };
-  const rm = ws.addRow(["Média da turma", plan.media === null ? "-" : plan.media]);
-  rm.font = { bold: true };
-  rm.eachCell(c => pintar(c, PROF_CORES.media));
+  const rp = ws.addRow(["% Acertos"].concat(plan.percentuais.map(p => p === null ? "-" : p + "%")).concat(["Média", plan.media === null ? "-" : plan.media]));
+  rp.font = { bold: true };
+  pintar(rp.getCell(n + 2), PROF_CORES.media);
+  pintar(rp.getCell(n + 3), PROF_CORES.media);
   ws.addRow([]);
   for (const [chave, rotulo] of PROF_FAIXAS) {
     const r = ws.addRow([rotulo, plan.contagemFaixas[chave]]);
