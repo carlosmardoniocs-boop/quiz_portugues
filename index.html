@@ -236,10 +236,23 @@ async function jaRespondeuQuiz(quiz, aluno) {
   try {
     const ref = window.firestoreDoc(window.firestoreDB, "resultados", idDocumentoResultado(quiz, aluno));
     const snap = await window.firestoreGetDoc(ref);
-    return snap.exists();
+    if (!snap.exists()) return false;
+    const d = snap.data() || {};
+    if (!Array.isArray(d.respostas)) return false;
+    return d.status === "andamento" ? "andamento" : "concluido";
   } catch (e) {
     return false;
   }
+}
+
+async function gravarTentativa(quiz, campos) {
+  if (!ALUNO_REGISTRA) return null;
+  if (!window.firebasePronto) { console.error("Firebase não está pronto."); return false; }
+  try {
+    const ref = window.firestoreDoc(window.firestoreDB, "resultados", idDocumentoResultado(quiz, ALUNO_ATUAL));
+    await window.firestoreSetDoc(ref, campos, { merge: true });
+    return true;
+  } catch (e) { console.error("Erro ao gravar tentativa:", e); return false; }
 }
 
 async function enviarResultado(quiz, gabarito, respostas, acertos, nota, cfg, atingiuMeta) {
@@ -251,8 +264,8 @@ async function enviarResultado(quiz, gabarito, respostas, acertos, nota, cfg, at
       quiz: quiz, turma: ALUNO_TURMA, aluno: ALUNO_ATUAL,
       gabarito: gabarito, respostas: respostas,
       acertos: acertos, nota: nota, config: cfg, atingiuMeta: !!atingiuMeta,
-      data: new Date().toISOString(),
-    });
+      status: "concluido", data: new Date().toISOString(),
+    }, { merge: true });
     return true;
   } catch (e) { console.error("Erro ao enviar resultado:", e); return false; }
 }
@@ -843,7 +856,7 @@ async function telaCategorias() {
         const feito = await jaRespondeuQuiz(nome, ALUNO_ATUAL);
         if (feito) {
           const avisoCorpo = cabecalho("Categorias");
-          await digitarParagrafo(avisoCorpo, "Você já concluiu este quiz.", "erro-texto");
+          await digitarParagrafo(avisoCorpo, feito === "andamento" ? "Você já iniciou este quiz e saiu antes de terminar." : "Você já concluiu este quiz.", "erro-texto");
           await digitarParagrafo(avisoCorpo, "Fale com seu professor se precisar refazer.");
           avisoCorpo.appendChild(criarBotao("Voltar", telaCategorias));
           return;
@@ -905,6 +918,17 @@ async function telaQuiz(arquivo) {
   const erros = [];
 
   const fila = ordem.slice();
+  const inicioOk = await gravarTentativa(nomeQuiz, {
+    quiz: nomeQuiz, turma: ALUNO_TURMA, aluno: ALUNO_ATUAL,
+    gabarito: gabaritoLista, respostas: respostasLista.slice(),
+    acertos: 0, nota: 0, config: cfg, atingiuMeta: false,
+    status: "andamento", inicio: new Date().toISOString(), data: new Date().toISOString(),
+  });
+  if (inicioOk === false) {
+    await digitarParagrafo(corpo, "Não consegui registrar o início do quiz. Verifique a internet e tente de novo.", "erro-texto");
+    corpo.appendChild(criarBotao("Voltar", telaCategorias));
+    return;
+  }
   atualizarProgresso({ quizAtual: nomeQuiz, acao: "lendo", pontos: 0, acertos: 0, total: total, modo: cfg.modo });
 
   while (fila.length > 0) {
@@ -944,7 +968,7 @@ async function telaQuiz(arquivo) {
       blocos.push({ botao, alternativa });
     }
     if (desafio) {
-      corpoQ.appendChild(criarBotao("Pular (a questão volta mais tarde)", () => resolverResposta("PULAR"), false, { podeClicar: () => liberado }));
+      corpoQ.appendChild(criarBotao("Pular", () => resolverResposta("PULAR"), false, { podeClicar: () => liberado }));
     }
     for (const bloco of blocos) {
       await digitar(bloco.botao.querySelector(".texto-alt"), bloco.alternativa.texto);
@@ -973,15 +997,16 @@ async function telaQuiz(arquivo) {
       respostasLista[questao.indiceOriginal] = MAPA_POSICAO_LETRA[respostaUsuario] || "-";
     }
 
-    pontos = Math.round((pontos + pontuarQuestao(cfg, total, resultado)) * 100) / 100;
+    pontos = pontos + pontuarQuestao(cfg, total, resultado);
     if (resultado === "acertou") acertos += 1;
     atualizarProgresso({ acao: resultado, pontos: pontos, acertos: acertos });
+    gravarTentativa(nomeQuiz, { respostas: respostasLista.slice(), acertos: acertos, nota: Math.round(pontos * 100) / 100, data: new Date().toISOString() });
 
     const feedback = document.createElement("p");
     if (resultado === "acertou") {
       feedback.textContent = "Correto!"; feedback.className = "destaque-texto"; somAcerto();
     } else if (resultado === "pulou") {
-      feedback.textContent = (respostaEscolhida === "TEMPO" ? "Tempo esgotado! " : "Você pulou. ") + "A questão volta mais tarde.";
+      feedback.textContent = respostaEscolhida === "TEMPO" ? "Tempo esgotado!" : "Você pulou.";
       feedback.className = "erro-texto";
       fila.push(questao);
     } else {
